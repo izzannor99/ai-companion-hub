@@ -31,6 +31,9 @@ export const AVAILABLE_MODELS = [
   { id: 'gemini-pro', name: 'Gemini 2.5 Pro', backend: 'cloud' },
 ];
 
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
 export async function sendChatMessage(
   messages: ChatMessage[],
   settings: ChatSettings,
@@ -81,16 +84,19 @@ async function sendCloudMessage(
   settings: ChatSettings,
   onChunk?: (chunk: string) => void
 ): Promise<string> {
-  // For cloud, we'll call our edge function (to be created when Cloud is enabled)
-  const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`, {
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    throw new Error('Cloud backend not configured. Please enable Lovable Cloud.');
+  }
+
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
     },
     body: JSON.stringify({
       messages,
-      model: settings.model === 'gemini-pro' ? 'google/gemini-2.5-pro' : 'google/gemini-2.5-flash',
+      model: settings.model,
       temperature: settings.temperature,
       top_p: settings.topP,
       max_tokens: settings.maxTokens,
@@ -99,8 +105,14 @@ async function sendCloudMessage(
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Cloud API error: ${response.status} - ${errorText}`);
+    let errorMessage = `Cloud API error: ${response.status}`;
+    try {
+      const errorData = await response.json();
+      errorMessage = errorData.error || errorMessage;
+    } catch {
+      // Use default error message
+    }
+    throw new Error(errorMessage);
   }
 
   if (onChunk && response.body) {
