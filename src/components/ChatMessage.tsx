@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Copy, Check, Pencil, Trash2, User, Bot } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { Copy, Check, Pencil, Trash2, User, Bot, Volume2, VolumeX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Message } from '@/lib/db';
@@ -12,12 +12,56 @@ interface ChatMessageProps {
   onDelete?: (id: string) => void;
 }
 
+// Speech synthesis helper
+const speak = (text: string, onEnd?: () => void): SpeechSynthesisUtterance | null => {
+  if (!('speechSynthesis' in window)) {
+    return null;
+  }
+  
+  // Cancel any ongoing speech
+  window.speechSynthesis.cancel();
+  
+  // Strip markdown for cleaner speech
+  const cleanText = text
+    .replace(/```[\s\S]*?```/g, 'code block')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/#{1,6}\s/g, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, 'image: $1');
+  
+  const utterance = new SpeechSynthesisUtterance(cleanText);
+  utterance.rate = 1.0;
+  utterance.pitch = 1.0;
+  utterance.volume = 1.0;
+  
+  if (onEnd) {
+    utterance.onend = onEnd;
+    utterance.onerror = onEnd;
+  }
+  
+  window.speechSynthesis.speak(utterance);
+  return utterance;
+};
+
 export function ChatMessage({ message, onEdit, onDelete }: ChatMessageProps) {
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
   const isUser = message.role === 'user';
+  const isTTSSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
+
+  // Stop speaking when component unmounts
+  useEffect(() => {
+    return () => {
+      if (isSpeaking) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, [isSpeaking]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(message.content);
@@ -31,6 +75,16 @@ export function ChatMessage({ message, onEdit, onDelete }: ChatMessageProps) {
       setIsEditing(false);
     }
   };
+
+  const handleSpeak = useCallback(() => {
+    if (isSpeaking) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+    } else {
+      speak(message.content, () => setIsSpeaking(false));
+      setIsSpeaking(true);
+    }
+  }, [isSpeaking, message.content]);
 
   return (
     <div
@@ -134,6 +188,22 @@ export function ChatMessage({ message, onEdit, onDelete }: ChatMessageProps) {
                 <Copy className="w-3 h-3" />
               )}
             </Button>
+            {/* TTS button for assistant messages */}
+            {!isUser && isTTSSupported && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn('w-7 h-7', isSpeaking && 'text-primary')}
+                onClick={handleSpeak}
+                title={isSpeaking ? 'Stop speaking' : 'Read aloud'}
+              >
+                {isSpeaking ? (
+                  <VolumeX className="w-3 h-3" />
+                ) : (
+                  <Volume2 className="w-3 h-3" />
+                )}
+              </Button>
+            )}
             {isUser && onEdit && (
               <Button
                 variant="ghost"
