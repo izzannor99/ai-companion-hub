@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Message } from '@/lib/db';
 import { cn } from '@/lib/utils';
+import { speak, stopSpeaking, isTTSSupported } from '@/lib/tts';
 import ReactMarkdown from 'react-markdown';
 
 interface ChatMessageProps {
@@ -12,39 +13,6 @@ interface ChatMessageProps {
   onDelete?: (id: string) => void;
 }
 
-// Speech synthesis helper
-const speak = (text: string, onEnd?: () => void): SpeechSynthesisUtterance | null => {
-  if (!('speechSynthesis' in window)) {
-    return null;
-  }
-  
-  // Cancel any ongoing speech
-  window.speechSynthesis.cancel();
-  
-  // Strip markdown for cleaner speech
-  const cleanText = text
-    .replace(/```[\s\S]*?```/g, 'code block')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/\*([^*]+)\*/g, '$1')
-    .replace(/#{1,6}\s/g, '')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/!\[([^\]]*)\]\([^)]+\)/g, 'image: $1');
-  
-  const utterance = new SpeechSynthesisUtterance(cleanText);
-  utterance.rate = 1.0;
-  utterance.pitch = 1.0;
-  utterance.volume = 1.0;
-  
-  if (onEnd) {
-    utterance.onend = onEnd;
-    utterance.onerror = onEnd;
-  }
-  
-  window.speechSynthesis.speak(utterance);
-  return utterance;
-};
-
 export function ChatMessage({ message, onEdit, onDelete }: ChatMessageProps) {
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -52,7 +20,7 @@ export function ChatMessage({ message, onEdit, onDelete }: ChatMessageProps) {
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   const isUser = message.role === 'user';
-  const isTTSSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
+  const ttsSupported = isTTSSupported();
 
   // Stop speaking when component unmounts
   useEffect(() => {
@@ -78,10 +46,10 @@ export function ChatMessage({ message, onEdit, onDelete }: ChatMessageProps) {
 
   const handleSpeak = useCallback(() => {
     if (isSpeaking) {
-      window.speechSynthesis.cancel();
+      stopSpeaking();
       setIsSpeaking(false);
     } else {
-      speak(message.content, () => setIsSpeaking(false));
+      speak(message.content, { onEnd: () => setIsSpeaking(false) });
       setIsSpeaking(true);
     }
   }, [isSpeaking, message.content]);
@@ -189,7 +157,7 @@ export function ChatMessage({ message, onEdit, onDelete }: ChatMessageProps) {
               )}
             </Button>
             {/* TTS button for assistant messages */}
-            {!isUser && isTTSSupported && (
+            {!isUser && ttsSupported && (
               <Button
                 variant="ghost"
                 size="icon"

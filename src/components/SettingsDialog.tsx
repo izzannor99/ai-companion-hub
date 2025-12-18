@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Cloud, Server, RefreshCw } from 'lucide-react';
+import { X, Cloud, Server, RefreshCw, Volume2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Switch } from '@/components/ui/switch';
 import { ChatSettings, DEFAULT_SETTINGS, AVAILABLE_MODELS } from '@/lib/chat-api';
 import { cn } from '@/lib/utils';
 
@@ -68,10 +69,11 @@ export function SettingsDialog({
         </DialogHeader>
 
         <Tabs defaultValue="backend" className="mt-4">
-          <TabsList className="grid w-full grid-cols-3 bg-muted">
+          <TabsList className="grid w-full grid-cols-4 bg-muted">
             <TabsTrigger value="backend">Backend</TabsTrigger>
             <TabsTrigger value="model">Model</TabsTrigger>
-            <TabsTrigger value="prompt">System Prompt</TabsTrigger>
+            <TabsTrigger value="voice">Voice</TabsTrigger>
+            <TabsTrigger value="prompt">Prompt</TabsTrigger>
           </TabsList>
 
           <TabsContent value="backend" className="space-y-4 mt-4">
@@ -227,6 +229,30 @@ export function SettingsDialog({
                 className="py-2"
               />
             </div>
+          </TabsContent>
+
+          <TabsContent value="voice" className="space-y-4 mt-4">
+            <div className="flex items-center justify-between p-4 rounded-xl border border-border">
+              <div className="flex items-center gap-3">
+                <Volume2 className="w-5 h-5 text-primary" />
+                <div>
+                  <p className="font-medium">Auto-play responses</p>
+                  <p className="text-xs text-muted-foreground">
+                    Automatically read AI responses aloud
+                  </p>
+                </div>
+              </div>
+              <Switch
+                checked={localSettings.autoPlayTTS}
+                onCheckedChange={(checked) =>
+                  setLocalSettings({ ...localSettings, autoPlayTTS: checked })
+                }
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Uses your browser's built-in speech synthesis. You can also manually 
+              click the speaker icon on any message to read it aloud.
+            </p>
           </TabsContent>
 
           <TabsContent value="prompt" className="space-y-4 mt-4">
