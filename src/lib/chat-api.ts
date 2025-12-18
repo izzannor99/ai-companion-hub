@@ -8,6 +8,7 @@ export interface ChatSettings {
   topP: number;
   maxTokens: number;
   systemPrompt: string;
+  autoPlayTTS: boolean;
 }
 
 export interface ChatMessage {
@@ -23,6 +24,7 @@ export const DEFAULT_SETTINGS: ChatSettings = {
   topP: 0.9,
   maxTokens: 2048,
   systemPrompt: 'You are AraChat, a helpful, harmless, and honest AI assistant. Be concise and clear in your responses.',
+  autoPlayTTS: false,
 };
 
 export const AVAILABLE_MODELS = [

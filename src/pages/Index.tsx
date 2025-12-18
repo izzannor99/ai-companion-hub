@@ -25,6 +25,7 @@ import {
   saveSettings,
   sendChatMessage,
 } from '@/lib/chat-api';
+import { speak, isTTSSupported } from '@/lib/tts';
 import { cn } from '@/lib/utils';
 
 export default function Index() {
@@ -150,6 +151,11 @@ export default function Index() {
       setConversations(prev =>
         prev.map(c => (c.id === updatedConv.id ? updatedConv : c))
       );
+
+      // Auto-play TTS if enabled
+      if (settings.autoPlayTTS && isTTSSupported() && fullResponse) {
+        speak(fullResponse);
+      }
     } catch (err: any) {
       console.error('Chat error:', err);
       toast({
