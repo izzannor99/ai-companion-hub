@@ -11,9 +11,23 @@ export function stripMarkdown(text: string): string {
     .replace(/!\[([^\]]*)\]\([^)]+\)/g, 'image: $1');
 }
 
+export function getAvailableVoices(): SpeechSynthesisVoice[] {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    return [];
+  }
+  return window.speechSynthesis.getVoices();
+}
+
+export function findVoiceByName(name: string): SpeechSynthesisVoice | null {
+  if (!name) return null;
+  const voices = getAvailableVoices();
+  return voices.find(v => v.name === name) || null;
+}
+
 export function speak(
   text: string, 
   options?: {
+    voice?: string;
     rate?: number;
     pitch?: number;
     volume?: number;
@@ -29,6 +43,14 @@ export function speak(
   
   const cleanText = stripMarkdown(text);
   const utterance = new SpeechSynthesisUtterance(cleanText);
+  
+  // Set voice if specified
+  if (options?.voice) {
+    const voice = findVoiceByName(options.voice);
+    if (voice) {
+      utterance.voice = voice;
+    }
+  }
   
   utterance.rate = options?.rate ?? 1.0;
   utterance.pitch = options?.pitch ?? 1.0;
