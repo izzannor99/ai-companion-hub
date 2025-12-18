@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Cloud, Server, RefreshCw, Volume2 } from 'lucide-react';
+import { X, Cloud, Server, RefreshCw, Volume2, Play } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { ChatSettings, DEFAULT_SETTINGS, AVAILABLE_MODELS } from '@/lib/chat-api';
+import { getAvailableVoices, speak, isTTSSupported } from '@/lib/tts';
 import { cn } from '@/lib/utils';
 
 interface SettingsDialogProps {
@@ -32,6 +33,28 @@ export function SettingsDialog({
   const [localSettings, setLocalSettings] = useState<ChatSettings>(settings);
   const [localModels, setLocalModels] = useState<string[]>([]);
   const [isScanning, setIsScanning] = useState(false);
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+
+  // Load available voices
+  useEffect(() => {
+    const loadVoices = () => {
+      const availableVoices = getAvailableVoices();
+      setVoices(availableVoices);
+    };
+
+    loadVoices();
+    
+    // Voices may load asynchronously
+    if (isTTSSupported()) {
+      window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+
+    return () => {
+      if (isTTSSupported()) {
+        window.speechSynthesis.onvoiceschanged = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     setLocalSettings(settings);
@@ -249,6 +272,57 @@ export function SettingsDialog({
                 }
               />
             </div>
+
+            <div className="space-y-2">
+              <Label>Voice</Label>
+              <div className="flex gap-2">
+                <select
+                  value={localSettings.ttsVoice}
+                  onChange={(e) =>
+                    setLocalSettings({ ...localSettings, ttsVoice: e.target.value })
+                  }
+                  className="flex-1 p-2 rounded-lg bg-muted border border-border"
+                >
+                  <option value="">System Default</option>
+                  {voices.map((voice) => (
+                    <option key={voice.name} value={voice.name}>
+                      {voice.name} ({voice.lang})
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => speak('Hello! This is a preview of the selected voice.', {
+                    voice: localSettings.ttsVoice,
+                    rate: localSettings.ttsRate,
+                  })}
+                  title="Preview voice"
+                >
+                  <Play className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <Label>Speech Rate</Label>
+                <span className="text-sm text-muted-foreground">
+                  {localSettings.ttsRate.toFixed(1)}x
+                </span>
+              </div>
+              <Slider
+                value={[localSettings.ttsRate]}
+                onValueChange={([v]) =>
+                  setLocalSettings({ ...localSettings, ttsRate: v })
+                }
+                min={0.5}
+                max={2}
+                step={0.1}
+                className="py-2"
+              />
+            </div>
+
             <p className="text-xs text-muted-foreground">
               Uses your browser's built-in speech synthesis. You can also manually 
               click the speaker icon on any message to read it aloud.

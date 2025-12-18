@@ -9,6 +9,8 @@ export interface ChatSettings {
   maxTokens: number;
   systemPrompt: string;
   autoPlayTTS: boolean;
+  ttsVoice: string;
+  ttsRate: number;
 }
 
 export interface ChatMessage {
@@ -25,6 +27,8 @@ export const DEFAULT_SETTINGS: ChatSettings = {
   maxTokens: 2048,
   systemPrompt: 'You are AraChat, a helpful, harmless, and honest AI assistant. Be concise and clear in your responses.',
   autoPlayTTS: false,
+  ttsVoice: '',
+  ttsRate: 1.0,
 };
 
 export const AVAILABLE_MODELS = [

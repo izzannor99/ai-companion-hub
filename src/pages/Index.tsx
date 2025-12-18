@@ -154,7 +154,10 @@ export default function Index() {
 
       // Auto-play TTS if enabled
       if (settings.autoPlayTTS && isTTSSupported() && fullResponse) {
-        speak(fullResponse);
+        speak(fullResponse, {
+          voice: settings.ttsVoice,
+          rate: settings.ttsRate,
+        });
       }
     } catch (err: any) {
       console.error('Chat error:', err);
