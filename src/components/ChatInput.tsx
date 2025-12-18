@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from 'react';
-import { Send, Mic, MicOff, Square, Loader2 } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { Send, Mic, MicOff, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -10,12 +11,46 @@ interface ChatInputProps {
   onStop?: () => void;
 }
 
+// Type for browser Speech Recognition
+interface SpeechRecognitionEvent extends Event {
+  results: SpeechRecognitionResultList;
+  resultIndex: number;
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string;
+  message?: string;
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition: new () => SpeechRecognition;
+    webkitSpeechRecognition: new () => SpeechRecognition;
+  }
+}
+
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+  onstart: (() => void) | null;
+}
+
 export function ChatInput({ onSend, isLoading, onStop }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+
+  // Check if speech recognition is supported
+  const isSpeechSupported = typeof window !== 'undefined' && 
+    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -23,6 +58,60 @@ export function ChatInput({ onSend, isLoading, onStop }: ChatInputProps) {
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
     }
   }, [message]);
+
+  // Initialize speech recognition
+  useEffect(() => {
+    if (!isSpeechSupported) return;
+
+    const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognitionAPI();
+    
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let finalTranscript = '';
+      let interimTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      if (finalTranscript) {
+        setMessage(prev => {
+          const separator = prev && !prev.endsWith(' ') ? ' ' : '';
+          return prev + separator + finalTranscript;
+        });
+      }
+    };
+
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      console.error('Speech recognition error:', event.error);
+      setIsRecording(false);
+      
+      if (event.error === 'not-allowed') {
+        toast.error('Microphone access denied. Please allow microphone access.');
+      } else if (event.error !== 'aborted') {
+        toast.error(`Speech recognition error: ${event.error}`);
+      }
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+    };
+
+    recognitionRef.current = recognition;
+
+    return () => {
+      recognition.abort();
+    };
+  }, [isSpeechSupported]);
 
   const handleSend = () => {
     if (message.trim() && !isLoading) {
@@ -38,41 +127,26 @@ export function ChatInput({ onSend, isLoading, onStop }: ChatInputProps) {
     }
   };
 
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        stream.getTracks().forEach(track => track.stop());
-        
-        // For now, just show a placeholder message
-        // In production, this would send to a STT service
-        setMessage(prev => prev + ' [Voice input recorded - STT integration required]');
-      };
-
-      mediaRecorder.start();
-      setIsRecording(true);
-    } catch (err) {
-      console.error('Failed to start recording:', err);
+  const toggleRecording = useCallback(() => {
+    if (!recognitionRef.current) {
+      toast.error('Speech recognition is not supported in your browser');
+      return;
     }
-  };
 
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
+    if (isRecording) {
+      recognitionRef.current.stop();
       setIsRecording(false);
+    } else {
+      try {
+        recognitionRef.current.start();
+        setIsRecording(true);
+        toast.success('Listening...', { duration: 1500 });
+      } catch (err) {
+        console.error('Failed to start recording:', err);
+        toast.error('Failed to start voice input');
+      }
     }
-  };
+  }, [isRecording]);
 
   return (
     <div className="p-4 border-t border-border bg-card/50">
@@ -83,7 +157,7 @@ export function ChatInput({ onSend, isLoading, onStop }: ChatInputProps) {
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Send a message..."
+            placeholder={isRecording ? "Listening..." : "Send a message..."}
             className="min-h-[52px] max-h-[200px] resize-none border-0 bg-transparent pr-24 py-4 focus-visible:ring-0 scrollbar-thin"
             disabled={isLoading}
             rows={1}
@@ -91,22 +165,25 @@ export function ChatInput({ onSend, isLoading, onStop }: ChatInputProps) {
           
           <div className="absolute right-2 bottom-2 flex items-center gap-1">
             {/* Voice button */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn(
-                'rounded-full transition-colors',
-                isRecording && 'bg-destructive text-destructive-foreground animate-pulse-glow'
-              )}
-              onClick={isRecording ? stopRecording : startRecording}
-              disabled={isLoading}
-            >
-              {isRecording ? (
-                <MicOff className="w-5 h-5" />
-              ) : (
-                <Mic className="w-5 h-5" />
-              )}
-            </Button>
+            {isSpeechSupported && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  'rounded-full transition-colors',
+                  isRecording && 'bg-destructive text-destructive-foreground animate-pulse-glow'
+                )}
+                onClick={toggleRecording}
+                disabled={isLoading}
+                title={isRecording ? "Stop listening" : "Start voice input"}
+              >
+                {isRecording ? (
+                  <MicOff className="w-5 h-5" />
+                ) : (
+                  <Mic className="w-5 h-5" />
+                )}
+              </Button>
+            )}
 
             {/* Send/Stop button */}
             {isLoading ? (
