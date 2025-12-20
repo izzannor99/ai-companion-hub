@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Cloud, Server, RefreshCw, Volume2, Play, Key, Mic, Bot } from 'lucide-react';
+import { Cloud, Server, RefreshCw, Volume2, Play, Key, Mic, Bot, HardDrive } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { ChatSettings, DEFAULT_SETTINGS, AVAILABLE_MODELS, DEFAULT_API_KEYS } from '@/lib/chat-api';
 import { getAvailableVoices, speak, isTTSSupported } from '@/lib/tts';
+import { ModelManager } from '@/components/ModelManager';
 import { cn } from '@/lib/utils';
 
 interface SettingsDialogProps {
@@ -124,9 +125,10 @@ export function SettingsDialog({
         </DialogHeader>
 
         <Tabs defaultValue="backend" className="mt-4">
-          <TabsList className="grid w-full grid-cols-5 bg-muted">
+          <TabsList className="grid w-full grid-cols-6 bg-muted">
             <TabsTrigger value="backend" className="text-xs">Backend</TabsTrigger>
-            <TabsTrigger value="model" className="text-xs">Model</TabsTrigger>
+            <TabsTrigger value="models" className="text-xs">Models</TabsTrigger>
+            <TabsTrigger value="model" className="text-xs">Config</TabsTrigger>
             <TabsTrigger value="apikeys" className="text-xs">API Keys</TabsTrigger>
             <TabsTrigger value="voice" className="text-xs">Voice</TabsTrigger>
             <TabsTrigger value="prompt" className="text-xs">Prompt</TabsTrigger>
@@ -274,6 +276,10 @@ export function SettingsDialog({
                 </p>
               </div>
             )}
+          </TabsContent>
+
+          <TabsContent value="models" className="mt-4">
+            <ModelManager localUrl={localSettings.localUrl} />
           </TabsContent>
 
           <TabsContent value="model" className="space-y-4 mt-4">
