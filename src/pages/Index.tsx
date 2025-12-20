@@ -5,7 +5,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import { ChatSidebar } from '@/components/ChatSidebar';
 import { ChatMessage } from '@/components/ChatMessage';
-import { ChatInput } from '@/components/ChatInput';
+import { ChatInput, ChatInputRef } from '@/components/ChatInput';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { TypingIndicator } from '@/components/TypingIndicator';
 import { EmptyState } from '@/components/EmptyState';
@@ -25,7 +25,7 @@ import {
   saveSettings,
   sendChatMessage,
 } from '@/lib/chat-api';
-import { speak, isTTSSupported } from '@/lib/tts';
+import { speak, isTTSSupported, stopSpeaking } from '@/lib/tts';
 import { cn } from '@/lib/utils';
 
 export default function Index() {
@@ -38,6 +38,7 @@ export default function Index() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const chatInputRef = useRef<ChatInputRef>(null);
   const { toast } = useToast();
 
   // Initialize DB and load conversations
@@ -157,6 +158,12 @@ export default function Index() {
         speak(fullResponse, {
           voice: settings.ttsVoice,
           rate: settings.ttsRate,
+          onEnd: () => {
+            // Voice conversation mode: start listening after AI finishes speaking
+            if (settings.voiceConversation && chatInputRef.current) {
+              setTimeout(() => chatInputRef.current?.startListening(), 300);
+            }
+          },
         });
       }
     } catch (err: any) {
@@ -341,9 +348,11 @@ export default function Index() {
 
         {/* Input */}
         <ChatInput
+          ref={chatInputRef}
           onSend={handleSendMessage}
           isLoading={isLoading}
           onStop={() => abortRef.current?.abort()}
+          autoSendOnVoice={settings.voiceConversation}
         />
       </div>
 
