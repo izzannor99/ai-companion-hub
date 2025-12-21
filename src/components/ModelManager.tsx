@@ -290,42 +290,19 @@ export function ModelManager({ localUrl, onModelSelect }: ModelManagerProps) {
     return `https://huggingface.co/${repo}`;
   };
 
-  // Download file - uses direct link approach which is more reliable for large files
+  // Download file - opens HuggingFace download URL directly in new tab
+  // This is the most reliable method as it bypasses CORS and lets HF handle the download
   const downloadFile = useCallback((repo: string, filename: string) => {
     const url = getDownloadUrl(repo, filename);
     
-    setDownloadState({
-      isDownloading: true,
-      progress: 0,
-      filename,
-    });
-
-    toast.info(`Starting download: ${filename}`, { duration: 3000 });
-    
-    // Create a hidden link and click it - most reliable method for HuggingFace
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    // Add to saved models
+    // Add to saved models first
     addFromSearch(repo, filename);
     
-    toast.success(`Download started! Check your browser's downloads. Load the file in llama.cpp when complete.`, { duration: 5000 });
+    // Open the download URL in a new tab - HuggingFace will handle the download
+    window.open(url, '_blank', 'noopener,noreferrer');
     
-    // Reset state after a short delay
-    setTimeout(() => {
-      setDownloadState({
-        isDownloading: false,
-        progress: 0,
-        filename: '',
-      });
-    }, 2000);
-  }, []);
+    toast.success(`Download page opened! Save the file and load it in llama.cpp.`, { duration: 5000 });
+  }, [savedModels]);
 
   return (
     <div className="space-y-4">
