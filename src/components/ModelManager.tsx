@@ -283,7 +283,9 @@ export function ModelManager({ localUrl, onModelSelect }: ModelManagerProps) {
   };
 
   const getDownloadUrl = (repo: string, filename: string) => {
-    return `https://huggingface.co/${repo}/resolve/main/${filename}?download=true`;
+    // Encode the filename to handle special characters
+    const encodedFilename = encodeURIComponent(filename);
+    return `https://huggingface.co/${repo}/resolve/main/${encodedFilename}?download=true`;
   };
 
   const getRepoUrl = (repo: string) => {
