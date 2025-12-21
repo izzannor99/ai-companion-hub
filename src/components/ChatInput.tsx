@@ -1,10 +1,16 @@
 import { useState, useRef, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
-import { Send, Mic, MicOff, Square } from 'lucide-react';
+import { Send, Mic, MicOff, Square, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { 
+  isWhisperLoaded, 
+  loadWhisperModel, 
+  transcribeAudio, 
+  getSelectedWhisperModel 
+} from '@/lib/local-stt';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -54,35 +60,43 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
   function ChatInput({ onSend, isLoading, onStop, autoSendOnVoice }, ref) {
     const [message, setMessage] = useState('');
     const [isRecording, setIsRecording] = useState(false);
+    const [isTranscribing, setIsTranscribing] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const recognitionRef = useRef<SpeechRecognition | null>(null);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioChunksRef = useRef<Blob[]>([]);
     const pendingMessageRef = useRef('');
     const { isOnline } = useNetworkStatus();
 
-    // Check if speech recognition is supported
-    const isSpeechSupported = typeof window !== 'undefined' && 
+    // Check if local Whisper is available
+    const [whisperAvailable, setWhisperAvailable] = useState(false);
+    
+    useEffect(() => {
+      // Check if Whisper model is loaded
+      setWhisperAvailable(isWhisperLoaded());
+    }, []);
+
+    // Check if browser speech recognition is supported
+    const isBrowserSpeechSupported = typeof window !== 'undefined' && 
       ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
+
+    // Voice input is supported if either browser speech (online) or local Whisper is available
+    const isVoiceSupported = isBrowserSpeechSupported || whisperAvailable;
 
     // Expose methods via ref
     useImperativeHandle(ref, () => ({
       startListening: () => {
-        if (recognitionRef.current && !isRecording) {
-          try {
-            recognitionRef.current.start();
-            setIsRecording(true);
-          } catch (err) {
-            console.error('Failed to start recording:', err);
-          }
+        if (!isRecording && !isTranscribing) {
+          toggleRecording();
         }
       },
       stopListening: () => {
-        if (recognitionRef.current && isRecording) {
-          recognitionRef.current.stop();
-          setIsRecording(false);
+        if (isRecording) {
+          stopRecording();
         }
       },
       isListening: isRecording,
-    }), [isRecording]);
+    }), [isRecording, isTranscribing]);
 
     useEffect(() => {
       if (textareaRef.current) {
@@ -91,10 +105,10 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
       }
     }, [message]);
 
-    // Initialize speech recognition
+    // Initialize browser speech recognition (for online use)
     useEffect(() => {
-      if (!isSpeechSupported) {
-        console.log('Speech recognition not supported in this browser');
+      if (!isBrowserSpeechSupported) {
+        console.log('Browser speech recognition not supported');
         return;
       }
 
@@ -171,7 +185,89 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
       } catch (err) {
         console.error('Failed to initialize speech recognition:', err);
       }
-    }, [isSpeechSupported, autoSendOnVoice, onSend]);
+    }, [isBrowserSpeechSupported, autoSendOnVoice, onSend]);
+
+    // Start recording with local Whisper (for offline use)
+    const startLocalRecording = useCallback(async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        audioChunksRef.current = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunksRef.current.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = async () => {
+          stream.getTracks().forEach(track => track.stop());
+          
+          if (audioChunksRef.current.length === 0) {
+            return;
+          }
+
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          setIsTranscribing(true);
+          
+          try {
+            // Ensure model is loaded
+            if (!isWhisperLoaded()) {
+              toast.error('Loading Whisper model...');
+              const success = await loadWhisperModel(getSelectedWhisperModel(), (progress) => {
+                if (progress.message) {
+                  toast.loading(progress.message, { id: 'whisper-loading' });
+                }
+              });
+              toast.dismiss('whisper-loading');
+              if (!success) {
+                throw new Error('Failed to load model');
+              }
+              setWhisperAvailable(true);
+            }
+
+            // Convert blob to audio data for Whisper
+            const arrayBuffer = await audioBlob.arrayBuffer();
+            const audioContext = new AudioContext({ sampleRate: 16000 });
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            const audioData = audioBuffer.getChannelData(0);
+
+            const text = await transcribeAudio(audioData);
+            
+            if (text.trim()) {
+              if (autoSendOnVoice) {
+                onSend(text.trim());
+              } else {
+                setMessage(text.trim());
+              }
+            }
+          } catch (error) {
+            console.error('Transcription error:', error);
+            toast.error('Failed to transcribe audio');
+          } finally {
+            setIsTranscribing(false);
+          }
+        };
+
+        mediaRecorderRef.current = mediaRecorder;
+        mediaRecorder.start();
+        setIsRecording(true);
+        toast.success('Recording... (local Whisper)', { duration: 1500 });
+      } catch (error) {
+        console.error('Failed to start recording:', error);
+        toast.error('Failed to access microphone');
+      }
+    }, [autoSendOnVoice, onSend]);
+
+    const stopRecording = useCallback(() => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsRecording(false);
+    }, []);
 
     const handleSend = () => {
       if (message.trim() && !isLoading) {
@@ -189,21 +285,19 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
     };
 
     const toggleRecording = useCallback(() => {
-      if (!recognitionRef.current) {
-        toast.error('Speech recognition is not supported in your browser');
-        return;
-      }
-
-      // Check network status before starting - browser speech API needs internet
-      if (!isOnline) {
-        toast.error('Voice input requires internet (browser limitation). Type your message instead - local AI works offline!');
-        return;
-      }
-
       if (isRecording) {
-        recognitionRef.current.stop();
-        setIsRecording(false);
-      } else {
+        stopRecording();
+        return;
+      }
+
+      // Decide which method to use: local Whisper or browser speech API
+      const useLocalWhisper = !isOnline || whisperAvailable;
+
+      if (useLocalWhisper && whisperAvailable) {
+        // Use local Whisper for offline transcription
+        startLocalRecording();
+      } else if (isOnline && isBrowserSpeechSupported && recognitionRef.current) {
+        // Use browser speech API (requires internet)
         try {
           pendingMessageRef.current = '';
           setMessage('');
@@ -214,8 +308,13 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
           console.error('Failed to start recording:', err);
           toast.error('Failed to start voice input');
         }
+      } else if (!isOnline && !whisperAvailable) {
+        // Offline but no Whisper model
+        toast.error('Download a Whisper model in Settings → Voice for offline voice input');
+      } else {
+        toast.error('Voice input not available. Download Whisper model in Settings.');
       }
-    }, [isRecording, isOnline]);
+    }, [isRecording, isOnline, whisperAvailable, isBrowserSpeechSupported, startLocalRecording, stopRecording]);
 
     return (
       <div className="p-4 border-t border-border bg-card/50">
@@ -234,19 +333,26 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
             
             <div className="absolute right-2 bottom-2 flex items-center gap-1">
               {/* Voice button */}
-              {isSpeechSupported && (
+              {isVoiceSupported && (
                 <Button
                   variant="ghost"
                   size="icon"
                   className={cn(
                     'rounded-full transition-colors',
-                    isRecording && 'bg-destructive text-destructive-foreground animate-pulse-glow'
+                    isRecording && 'bg-destructive text-destructive-foreground animate-pulse-glow',
+                    isTranscribing && 'bg-primary/20'
                   )}
                   onClick={toggleRecording}
-                  disabled={isLoading}
-                  title={isRecording ? "Stop listening" : "Start voice input"}
+                  disabled={isLoading || isTranscribing}
+                  title={
+                    isTranscribing ? "Transcribing..." :
+                    isRecording ? "Stop listening" : 
+                    whisperAvailable ? "Voice input (offline)" : "Voice input"
+                  }
                 >
-                  {isRecording ? (
+                  {isTranscribing ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : isRecording ? (
                     <MicOff className="w-5 h-5" />
                   ) : (
                     <Mic className="w-5 h-5" />
