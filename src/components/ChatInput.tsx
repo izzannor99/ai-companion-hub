@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useNetworkStatus } from '@/hooks/use-network-status';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -56,6 +57,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const recognitionRef = useRef<SpeechRecognition | null>(null);
     const pendingMessageRef = useRef('');
+    const { isOnline } = useNetworkStatus();
 
     // Check if speech recognition is supported
     const isSpeechSupported = typeof window !== 'undefined' && 
@@ -136,7 +138,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
           if (event.error === 'not-allowed') {
             toast.error('Microphone access denied. Please allow microphone access in your browser settings.');
           } else if (event.error === 'network') {
-            toast.error('Network error. Please check your internet connection.');
+            toast.error('Voice input requires internet (browser limitation). Your chat messages still work offline with local AI.');
           } else if (event.error === 'no-speech') {
             // Silent fail for no-speech - user just didn't say anything
             console.log('No speech detected');
@@ -192,6 +194,12 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
         return;
       }
 
+      // Check network status before starting - browser speech API needs internet
+      if (!isOnline) {
+        toast.error('Voice input requires internet (browser limitation). Type your message instead - local AI works offline!');
+        return;
+      }
+
       if (isRecording) {
         recognitionRef.current.stop();
         setIsRecording(false);
@@ -207,7 +215,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
           toast.error('Failed to start voice input');
         }
       }
-    }, [isRecording]);
+    }, [isRecording, isOnline]);
 
     return (
       <div className="p-4 border-t border-border bg-card/50">
