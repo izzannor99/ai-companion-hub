@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Cloud, Server, RefreshCw, Volume2, Play, Key, Mic, Bot, HardDrive } from 'lucide-react';
+import { Cloud, Server, RefreshCw, Volume2, Play, Key, Mic, Bot, HardDrive, Cpu, Wifi, WifiOff } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -17,6 +17,7 @@ import { ChatSettings, DEFAULT_SETTINGS, AVAILABLE_MODELS, DEFAULT_API_KEYS } fr
 import { getAvailableVoices, speak, isTTSSupported } from '@/lib/tts';
 import { ModelManager } from '@/components/ModelManager';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 interface SettingsDialogProps {
   open: boolean;
@@ -114,9 +115,10 @@ export function SettingsDialog({
         </DialogHeader>
 
         <Tabs defaultValue="backend" className="mt-4">
-          <TabsList className="grid w-full grid-cols-6 bg-muted">
+          <TabsList className="grid w-full grid-cols-7 bg-muted">
             <TabsTrigger value="backend" className="text-xs">Backend</TabsTrigger>
             <TabsTrigger value="models" className="text-xs">Models</TabsTrigger>
+            <TabsTrigger value="hardware" className="text-xs">Hardware</TabsTrigger>
             <TabsTrigger value="model" className="text-xs">Config</TabsTrigger>
             <TabsTrigger value="apikeys" className="text-xs">API Keys</TabsTrigger>
             <TabsTrigger value="voice" className="text-xs">Voice</TabsTrigger>
@@ -596,6 +598,120 @@ export function SettingsDialog({
             >
               Reset to default
             </Button>
+          </TabsContent>
+
+          {/* Hardware Tab */}
+          <TabsContent value="hardware" className="space-y-4 mt-4">
+            {/* GPU Toggle */}
+            <div className="p-4 rounded-xl border-2 border-border bg-muted/30">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={cn(
+                    "p-2 rounded-lg",
+                    localSettings.useWebGPU ? "bg-primary/20" : "bg-muted"
+                  )}>
+                    <Cpu className={cn(
+                      "w-5 h-5",
+                      localSettings.useWebGPU ? "text-primary" : "text-muted-foreground"
+                    )} />
+                  </div>
+                  <div>
+                    <p className="font-medium">WebGPU Acceleration</p>
+                    <p className="text-xs text-muted-foreground">
+                      Use GPU for faster local AI inference
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  checked={localSettings.useWebGPU}
+                  onCheckedChange={(checked) => {
+                    // Check if WebGPU is available
+                    if (checked && !('gpu' in navigator)) {
+                      toast.error('WebGPU is not supported in this browser');
+                      return;
+                    }
+                    setLocalSettings({ ...localSettings, useWebGPU: checked });
+                    if (checked) {
+                      toast.success('WebGPU enabled! Restart local server with GPU support.');
+                    }
+                  }}
+                />
+              </div>
+              {localSettings.useWebGPU && (
+                <div className="mt-3 p-2 rounded-lg bg-primary/10 text-xs">
+                  <p className="font-medium text-primary">GPU Mode Active</p>
+                  <p className="text-muted-foreground mt-1">
+                    For llama.cpp, use: <code className="bg-muted px-1 rounded">--n-gpu-layers 99</code>
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Offline Toggle */}
+            <div className="p-4 rounded-xl border-2 border-border bg-muted/30">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={cn(
+                    "p-2 rounded-lg",
+                    localSettings.offlineMode ? "bg-orange-500/20" : "bg-muted"
+                  )}>
+                    {localSettings.offlineMode ? (
+                      <WifiOff className="w-5 h-5 text-orange-500" />
+                    ) : (
+                      <Wifi className="w-5 h-5 text-muted-foreground" />
+                    )}
+                  </div>
+                  <div>
+                    <p className="font-medium">Offline Mode</p>
+                    <p className="text-xs text-muted-foreground">
+                      Disable all cloud/internet connections
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  checked={localSettings.offlineMode}
+                  onCheckedChange={(checked) => {
+                    setLocalSettings({ 
+                      ...localSettings, 
+                      offlineMode: checked,
+                      // Force local backend when going offline
+                      backend: checked ? 'local' : localSettings.backend,
+                    });
+                    if (checked) {
+                      toast.success('Offline mode enabled. Using local backend only.');
+                    } else {
+                      toast.success('Online mode restored.');
+                    }
+                  }}
+                />
+              </div>
+              {localSettings.offlineMode && (
+                <div className="mt-3 p-2 rounded-lg bg-orange-500/10 text-xs">
+                  <p className="font-medium text-orange-500">Offline Mode Active</p>
+                  <p className="text-muted-foreground mt-1">
+                    Only local llama.cpp backend is available. Cloud features disabled.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Local Server URL (shown when offline) */}
+            {localSettings.offlineMode && (
+              <div className="space-y-2">
+                <Label>Local Server URL</Label>
+                <Input
+                  value={localSettings.localUrl}
+                  onChange={(e) =>
+                    setLocalSettings({ ...localSettings, localUrl: e.target.value })
+                  }
+                  placeholder="http://127.0.0.1:8081"
+                  className="bg-muted"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Make sure llama.cpp server is running at this address
+                </p>
+              </div>
+            )}
           </TabsContent>
         </Tabs>
 

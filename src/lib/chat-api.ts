@@ -21,6 +21,9 @@ export interface ChatSettings {
   ttsRate: number;
   voiceConversation: boolean;
   apiKeys: APIKeys;
+  // Hardware settings
+  useWebGPU: boolean;
+  offlineMode: boolean;
 }
 
 export interface ChatMessage {
@@ -49,6 +52,8 @@ export const DEFAULT_SETTINGS: ChatSettings = {
   ttsRate: 1.0,
   voiceConversation: false,
   apiKeys: DEFAULT_API_KEYS,
+  useWebGPU: false,
+  offlineMode: false,
 };
 
 export const AVAILABLE_MODELS = [
@@ -76,6 +81,11 @@ export async function sendChatMessage(
   settings: ChatSettings,
   onChunk?: (chunk: string) => void
 ): Promise<string> {
+  // If offline mode is enabled, only allow local backend
+  if (settings.offlineMode && settings.backend !== 'local') {
+    throw new Error('Offline mode is enabled. Only local backend is available.');
+  }
+
   const allMessages = settings.systemPrompt 
     ? [{ role: 'system' as const, content: settings.systemPrompt }, ...messages]
     : messages;
