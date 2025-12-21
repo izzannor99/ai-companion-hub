@@ -91,63 +91,84 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
 
     // Initialize speech recognition
     useEffect(() => {
-      if (!isSpeechSupported) return;
+      if (!isSpeechSupported) {
+        console.log('Speech recognition not supported in this browser');
+        return;
+      }
 
-      const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
-      const recognition = new SpeechRecognitionAPI();
-      
-      recognition.continuous = false; // Stop after each phrase for auto-send
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
-
-      recognition.onresult = (event: SpeechRecognitionEvent) => {
-        let finalTranscript = '';
-        let interimTranscript = '';
-
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const transcript = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            finalTranscript += transcript;
-          } else {
-            interimTranscript += transcript;
-          }
-        }
-
-        if (finalTranscript) {
-          pendingMessageRef.current = finalTranscript.trim();
-          setMessage(finalTranscript.trim());
-        } else if (interimTranscript) {
-          setMessage(interimTranscript);
-        }
-      };
-
-      recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-        console.error('Speech recognition error:', event.error);
-        setIsRecording(false);
+      try {
+        const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = new SpeechRecognitionAPI();
         
-        if (event.error === 'not-allowed') {
-          toast.error('Microphone access denied. Please allow microphone access.');
-        } else if (event.error !== 'aborted' && event.error !== 'no-speech') {
-          toast.error(`Speech recognition error: ${event.error}`);
-        }
-      };
+        recognition.continuous = false; // Stop after each phrase for auto-send
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
 
-      recognition.onend = () => {
-        setIsRecording(false);
-        // Auto-send if we have a pending message and autoSendOnVoice is enabled
-        if (autoSendOnVoice && pendingMessageRef.current) {
-          const msg = pendingMessageRef.current;
-          pendingMessageRef.current = '';
-          setMessage('');
-          onSend(msg);
-        }
-      };
+        recognition.onstart = () => {
+          console.log('Speech recognition started');
+        };
 
-      recognitionRef.current = recognition;
+        recognition.onresult = (event: SpeechRecognitionEvent) => {
+          let finalTranscript = '';
+          let interimTranscript = '';
 
-      return () => {
-        recognition.abort();
-      };
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              finalTranscript += transcript;
+            } else {
+              interimTranscript += transcript;
+            }
+          }
+
+          if (finalTranscript) {
+            pendingMessageRef.current = finalTranscript.trim();
+            setMessage(finalTranscript.trim());
+          } else if (interimTranscript) {
+            setMessage(interimTranscript);
+          }
+        };
+
+        recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+          console.error('Speech recognition error:', event.error, event.message);
+          setIsRecording(false);
+          
+          if (event.error === 'not-allowed') {
+            toast.error('Microphone access denied. Please allow microphone access in your browser settings.');
+          } else if (event.error === 'network') {
+            toast.error('Network error. Please check your internet connection.');
+          } else if (event.error === 'no-speech') {
+            // Silent fail for no-speech - user just didn't say anything
+            console.log('No speech detected');
+          } else if (event.error !== 'aborted') {
+            toast.error(`Speech recognition error: ${event.error}`);
+          }
+        };
+
+        recognition.onend = () => {
+          console.log('Speech recognition ended');
+          setIsRecording(false);
+          // Auto-send if we have a pending message and autoSendOnVoice is enabled
+          if (autoSendOnVoice && pendingMessageRef.current) {
+            const msg = pendingMessageRef.current;
+            pendingMessageRef.current = '';
+            setMessage('');
+            onSend(msg);
+          }
+        };
+
+        recognitionRef.current = recognition;
+
+        return () => {
+          try {
+            recognition.abort();
+          } catch (e) {
+            // Ignore errors on cleanup
+          }
+        };
+      } catch (err) {
+        console.error('Failed to initialize speech recognition:', err);
+      }
     }, [isSpeechSupported, autoSendOnVoice, onSend]);
 
     const handleSend = () => {

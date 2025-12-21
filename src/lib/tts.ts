@@ -11,7 +11,36 @@ export function stripMarkdown(text: string): string {
     .replace(/!\[([^\]]*)\]\([^)]+\)/g, 'image: $1');
 }
 
-export function getAvailableVoices(): SpeechSynthesisVoice[] {
+export function getAvailableVoices(): Promise<SpeechSynthesisVoice[]> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      resolve([]);
+      return;
+    }
+    
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) {
+      resolve(voices);
+      return;
+    }
+    
+    // Voices may not be loaded yet - wait for them
+    const handleVoicesChanged = () => {
+      window.speechSynthesis.removeEventListener('voiceschanged', handleVoicesChanged);
+      resolve(window.speechSynthesis.getVoices());
+    };
+    
+    window.speechSynthesis.addEventListener('voiceschanged', handleVoicesChanged);
+    
+    // Fallback timeout
+    setTimeout(() => {
+      window.speechSynthesis.removeEventListener('voiceschanged', handleVoicesChanged);
+      resolve(window.speechSynthesis.getVoices());
+    }, 1000);
+  });
+}
+
+export function getAvailableVoicesSync(): SpeechSynthesisVoice[] {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
     return [];
   }
@@ -20,7 +49,7 @@ export function getAvailableVoices(): SpeechSynthesisVoice[] {
 
 export function findVoiceByName(name: string): SpeechSynthesisVoice | null {
   if (!name) return null;
-  const voices = getAvailableVoices();
+  const voices = getAvailableVoicesSync();
   return voices.find(v => v.name === name) || null;
 }
 

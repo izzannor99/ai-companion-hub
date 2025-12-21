@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
-import { Download, ExternalLink, Trash2, Plus, HardDrive, RefreshCw, Search, Loader2 } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Download, ExternalLink, Trash2, Plus, HardDrive, RefreshCw, Search, Loader2, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -28,6 +29,12 @@ interface GGUFFile {
   repo: string;
   filename: string;
   size?: string;
+}
+
+interface DownloadState {
+  isDownloading: boolean;
+  progress: number;
+  filename: string;
 }
 
 interface ModelManagerProps {
@@ -111,6 +118,13 @@ export function ModelManager({ localUrl, onModelSelect }: ModelManagerProps) {
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
   const [repoFiles, setRepoFiles] = useState<GGUFFile[]>([]);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
+  
+  // Download state
+  const [downloadState, setDownloadState] = useState<DownloadState>({
+    isDownloading: false,
+    progress: 0,
+    filename: '',
+  });
 
   // Load saved models from localStorage
   useEffect(() => {
@@ -276,8 +290,57 @@ export function ModelManager({ localUrl, onModelSelect }: ModelManagerProps) {
     return `https://huggingface.co/${repo}`;
   };
 
+  // Download file - uses direct link approach which is more reliable for large files
+  const downloadFile = useCallback((repo: string, filename: string) => {
+    const url = getDownloadUrl(repo, filename);
+    
+    setDownloadState({
+      isDownloading: true,
+      progress: 0,
+      filename,
+    });
+
+    toast.info(`Starting download: ${filename}`, { duration: 3000 });
+    
+    // Create a hidden link and click it - most reliable method for HuggingFace
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    // Add to saved models
+    addFromSearch(repo, filename);
+    
+    toast.success(`Download started! Check your browser's downloads. Load the file in llama.cpp when complete.`, { duration: 5000 });
+    
+    // Reset state after a short delay
+    setTimeout(() => {
+      setDownloadState({
+        isDownloading: false,
+        progress: 0,
+        filename: '',
+      });
+    }, 2000);
+  }, []);
+
   return (
     <div className="space-y-4">
+      {/* Download Progress Indicator */}
+      {downloadState.isDownloading && (
+        <div className="p-3 rounded-lg bg-primary/10 border border-primary/30">
+          <div className="flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin text-primary" />
+            <span className="text-sm font-medium">Downloading: {downloadState.filename}</span>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            Check your browser's download manager for progress
+          </p>
+        </div>
+      )}
       {/* Server Status */}
       <div className="p-3 rounded-lg bg-muted/50 border border-border">
         <div className="flex items-center justify-between">
@@ -396,13 +459,15 @@ export function ModelManager({ localUrl, onModelSelect }: ModelManagerProps) {
                           variant="ghost"
                           size="icon"
                           className="w-6 h-6"
-                          onClick={() => {
-                            window.open(getDownloadUrl(selectedRepo, file.filename), '_blank');
-                            toast.success('Download started!');
-                          }}
+                          onClick={() => downloadFile(selectedRepo!, file.filename)}
+                          disabled={downloadState.isDownloading}
                           title="Download"
                         >
-                          <Download className="w-3 h-3" />
+                          {downloadState.isDownloading && downloadState.filename === file.filename ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Download className="w-3 h-3" />
+                          )}
                         </Button>
                       </div>
                     </div>
@@ -449,13 +514,15 @@ export function ModelManager({ localUrl, onModelSelect }: ModelManagerProps) {
                     variant="ghost"
                     size="icon"
                     className="w-7 h-7"
-                    onClick={() => {
-                      window.open(getDownloadUrl(model.repo, model.filename), '_blank');
-                      toast.success('Download started! Load the file in llama.cpp when complete.');
-                    }}
+                    onClick={() => downloadFile(model.repo, model.filename)}
+                    disabled={downloadState.isDownloading}
                     title="Download GGUF"
                   >
-                    <Download className="w-3 h-3" />
+                    {downloadState.isDownloading && downloadState.filename === model.filename ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Download className="w-3 h-3" />
+                    )}
                   </Button>
                 </div>
               </div>

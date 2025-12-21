@@ -48,23 +48,12 @@ export function SettingsDialog({
 
   // Load available voices
   useEffect(() => {
-    const loadVoices = () => {
-      const availableVoices = getAvailableVoices();
+    const loadVoices = async () => {
+      const availableVoices = await getAvailableVoices();
       setVoices(availableVoices);
     };
 
     loadVoices();
-    
-    // Voices may load asynchronously
-    if (isTTSSupported()) {
-      window.speechSynthesis.onvoiceschanged = loadVoices;
-    }
-
-    return () => {
-      if (isTTSSupported()) {
-        window.speechSynthesis.onvoiceschanged = null;
-      }
-    };
   }, []);
 
   useEffect(() => {
