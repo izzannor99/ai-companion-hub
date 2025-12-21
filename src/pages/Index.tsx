@@ -9,6 +9,7 @@ import { ChatInput, ChatInputRef } from '@/components/ChatInput';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { TypingIndicator } from '@/components/TypingIndicator';
 import { EmptyState } from '@/components/EmptyState';
+import { NetworkStatusIndicator } from '@/components/NetworkStatusIndicator';
 import {
   Conversation,
   Message,
@@ -304,7 +305,7 @@ export default function Index() {
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
-        <header className="h-14 border-b border-border flex items-center px-4 lg:px-6 shrink-0">
+        <header className="h-14 border-b border-border flex items-center justify-between px-4 lg:px-6 shrink-0">
           <div className="flex items-center gap-3 ml-10 lg:ml-0">
             <h2 className="font-medium truncate">
               {currentConversation?.title || 'New Chat'}
@@ -313,6 +314,7 @@ export default function Index() {
               {settings.backend === 'local' ? 'Local' : 'Cloud'}
             </span>
           </div>
+          <NetworkStatusIndicator showDetails />
         </header>
 
         {/* Messages */}

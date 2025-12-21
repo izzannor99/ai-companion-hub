@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
+import { LocalModelPicker } from '@/components/LocalModelPicker';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -580,6 +581,22 @@ export function ModelManager({ localUrl, onModelSelect }: ModelManagerProps) {
           </ScrollArea>
         </div>
       )}
+
+      {/* Local Model File Picker */}
+      <div>
+        <Label className="text-sm font-medium">Load Local Model File</Label>
+        <p className="text-xs text-muted-foreground mb-2">
+          Select a GGUF file from your computer
+        </p>
+        <LocalModelPicker 
+          onModelSelected={(file) => {
+            toast.success(`Model ready: ${file.name}`, {
+              description: 'Load this file in llama.cpp to use it.',
+              duration: 5000,
+            });
+          }}
+        />
+      </div>
 
       {/* Instructions */}
       <div className="p-3 rounded-lg bg-muted/50 border border-border text-xs text-muted-foreground space-y-2">
