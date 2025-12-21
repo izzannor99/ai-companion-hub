@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Cloud, Server, RefreshCw, Volume2, Play, Key, Mic, Bot, HardDrive, Cpu, Wifi, WifiOff } from 'lucide-react';
+import { Cloud, Server, RefreshCw, Volume2, Play, Key, Mic, Bot, HardDrive, Cpu, Wifi, WifiOff, Download } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -16,6 +16,7 @@ import { Switch } from '@/components/ui/switch';
 import { ChatSettings, DEFAULT_SETTINGS, AVAILABLE_MODELS, DEFAULT_API_KEYS } from '@/lib/chat-api';
 import { getAvailableVoices, speak, isTTSSupported } from '@/lib/tts';
 import { ModelManager } from '@/components/ModelManager';
+import { VoiceModelManager } from '@/components/VoiceModelManager';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -115,13 +116,17 @@ export function SettingsDialog({
         </DialogHeader>
 
         <Tabs defaultValue="backend" className="mt-4">
-          <TabsList className="grid w-full grid-cols-7 bg-muted">
+          <TabsList className="grid w-full grid-cols-8 bg-muted">
             <TabsTrigger value="backend" className="text-xs">Backend</TabsTrigger>
             <TabsTrigger value="models" className="text-xs">Models</TabsTrigger>
+            <TabsTrigger value="voicemodels" className="text-xs flex items-center gap-1">
+              <Download className="w-3 h-3" />
+              <span className="hidden sm:inline">Voice</span>
+            </TabsTrigger>
             <TabsTrigger value="hardware" className="text-xs">Hardware</TabsTrigger>
             <TabsTrigger value="model" className="text-xs">Config</TabsTrigger>
             <TabsTrigger value="apikeys" className="text-xs">API Keys</TabsTrigger>
-            <TabsTrigger value="voice" className="text-xs">Voice</TabsTrigger>
+            <TabsTrigger value="voice" className="text-xs">TTS</TabsTrigger>
             <TabsTrigger value="prompt" className="text-xs">Prompt</TabsTrigger>
           </TabsList>
 
@@ -271,6 +276,10 @@ export function SettingsDialog({
 
           <TabsContent value="models" className="mt-4">
             <ModelManager localUrl={localSettings.localUrl} />
+          </TabsContent>
+
+          <TabsContent value="voicemodels" className="mt-4">
+            <VoiceModelManager />
           </TabsContent>
 
           <TabsContent value="model" className="space-y-4 mt-4">
