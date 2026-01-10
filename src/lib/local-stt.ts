@@ -10,38 +10,44 @@ export interface WhisperModel {
   name: string;
   size: string;
   description: string;
+  language: 'en' | 'multi';
 }
 
 export const WHISPER_MODELS: WhisperModel[] = [
   {
     id: 'onnx-community/whisper-tiny.en',
-    name: 'Whisper Tiny (English)',
+    name: 'Tiny English',
     size: '~40MB',
-    description: 'Fastest, English only. Best for quick transcription.',
+    description: 'Fastest. Best for quick voice commands.',
+    language: 'en',
   },
   {
     id: 'onnx-community/whisper-base.en',
-    name: 'Whisper Base (English)',
+    name: 'Base English',
     size: '~75MB',
-    description: 'Good balance of speed and accuracy for English.',
+    description: 'Better accuracy, still fast.',
+    language: 'en',
   },
   {
     id: 'onnx-community/whisper-small.en',
-    name: 'Whisper Small (English)',
+    name: 'Small English',
     size: '~250MB',
-    description: 'Higher accuracy, slower. English only.',
+    description: 'Best English accuracy. Slower on CPU.',
+    language: 'en',
   },
   {
     id: 'onnx-community/whisper-tiny',
-    name: 'Whisper Tiny (Multilingual)',
+    name: 'Tiny Multilingual',
     size: '~40MB',
-    description: 'Fastest multilingual model. Supports 99+ languages.',
+    description: 'Fast, supports 99+ languages.',
+    language: 'multi',
   },
   {
     id: 'onnx-community/whisper-base',
-    name: 'Whisper Base (Multilingual)',
+    name: 'Base Multilingual',
     size: '~75MB',
-    description: 'Good multilingual support with reasonable speed.',
+    description: 'Better multilingual accuracy.',
+    language: 'multi',
   },
 ];
 
@@ -176,6 +182,39 @@ export function isWhisperLoaded(): boolean {
 export function unloadWhisper(): void {
   transcriber = null;
   currentModelId = null;
+}
+
+// Clear a downloaded model from cache
+export async function clearDownloadedModel(modelId: string): Promise<void> {
+  // Remove from localStorage tracking
+  const downloaded = getDownloadedModels();
+  const updated = downloaded.filter(id => id !== modelId);
+  localStorage.setItem(WHISPER_DOWNLOADED_KEY, JSON.stringify(updated));
+  
+  // Try to clear from browser cache if possible
+  if ('caches' in window) {
+    try {
+      const cacheNames = await caches.keys();
+      for (const cacheName of cacheNames) {
+        if (cacheName.includes('transformers') || cacheName.includes('huggingface')) {
+          const cache = await caches.open(cacheName);
+          const keys = await cache.keys();
+          for (const key of keys) {
+            if (key.url.includes(modelId.replace('/', '%2F')) || key.url.includes(modelId)) {
+              await cache.delete(key);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Could not clear model from cache:', e);
+    }
+  }
+  
+  // Unload if currently loaded
+  if (currentModelId === modelId) {
+    unloadWhisper();
+  }
 }
 
 // Check if WebGPU is supported
