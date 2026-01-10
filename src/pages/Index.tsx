@@ -10,6 +10,7 @@ import { SettingsDialog } from '@/components/SettingsDialog';
 import { TypingIndicator } from '@/components/TypingIndicator';
 import { EmptyState } from '@/components/EmptyState';
 import { NetworkStatusIndicator } from '@/components/NetworkStatusIndicator';
+import { VoiceCallMode } from '@/components/VoiceCallMode';
 import {
   Conversation,
   Message,
@@ -81,6 +82,15 @@ export default function Index() {
   };
 
   const handleSendMessage = async (content: string) => {
+    return sendMessageAndGetResponse(content);
+  };
+
+  // Voice call handler that returns the AI response
+  const handleVoiceCallMessage = async (content: string): Promise<string> => {
+    return sendMessageAndGetResponse(content);
+  };
+
+  const sendMessageAndGetResponse = async (content: string): Promise<string> => {
     const userMessage: Message = {
       id: generateId(),
       role: 'user',
@@ -120,13 +130,14 @@ export default function Index() {
     setStreamingContent('');
     abortRef.current = new AbortController();
 
+    let fullResponse = '';
+    
     try {
       const chatMessages = conv.messages.map(m => ({
         role: m.role,
         content: m.content,
       }));
 
-      let fullResponse = '';
       await sendChatMessage(
         chatMessages,
         settings,
@@ -154,7 +165,7 @@ export default function Index() {
         prev.map(c => (c.id === updatedConv.id ? updatedConv : c))
       );
 
-      // Auto-play TTS if enabled
+      // Auto-play TTS if enabled (but not during voice call - VoiceCallMode handles its own TTS)
       if (settings.autoPlayTTS && isTTSSupported() && fullResponse) {
         speak(fullResponse, {
           voice: settings.ttsVoice,
@@ -178,6 +189,8 @@ export default function Index() {
       setIsLoading(false);
       setStreamingContent('');
     }
+    
+    return fullResponse;
   };
 
   const handleEditMessage = async (id: string, content: string) => {
@@ -314,7 +327,15 @@ export default function Index() {
               {settings.backend === 'local' ? 'Local' : 'Cloud'}
             </span>
           </div>
-          <NetworkStatusIndicator showDetails />
+          <div className="flex items-center gap-2">
+            <VoiceCallMode
+              onSendMessage={handleVoiceCallMessage}
+              ttsVoice={settings.ttsVoice}
+              ttsRate={settings.ttsRate}
+              disabled={isLoading}
+            />
+            <NetworkStatusIndicator showDetails />
+          </div>
         </header>
 
         {/* Messages */}
