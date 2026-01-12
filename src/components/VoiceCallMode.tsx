@@ -322,6 +322,24 @@ export function VoiceCallMode({
     }
   }, []);
 
+  const handlePhoneClick = () => {
+    if (!canMakeCall) {
+      toast.info('Download a voice model first', {
+        description: 'Go to Settings → Voice Models to download Whisper for offline speech recognition.',
+        action: {
+          label: 'Open Settings',
+          onClick: () => {
+            // Dispatch a custom event that Index.tsx can listen for
+            window.dispatchEvent(new CustomEvent('open-settings', { detail: { tab: 'voicemodels' } }));
+          }
+        },
+        duration: 5000,
+      });
+      return;
+    }
+    startCall();
+  };
+
   if (!isInCall) {
     return (
       <Button
@@ -329,11 +347,11 @@ export function VoiceCallMode({
         size="icon"
         className={cn(
           'rounded-full transition-all',
-          canMakeCall ? 'text-green-500 hover:text-green-400 hover:bg-green-500/10' : 'text-muted-foreground'
+          canMakeCall ? 'text-green-500 hover:text-green-400 hover:bg-green-500/10' : 'text-muted-foreground hover:text-foreground'
         )}
-        onClick={startCall}
-        disabled={disabled || !canMakeCall}
-        title={canMakeCall ? 'Start voice call (offline)' : 'Download Whisper model in Settings → Voice Models'}
+        onClick={handlePhoneClick}
+        disabled={disabled}
+        title={canMakeCall ? 'Start voice call (offline)' : 'Setup required - click to learn more'}
       >
         <Phone className="w-5 h-5" />
       </Button>

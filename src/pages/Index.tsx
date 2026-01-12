@@ -53,6 +53,15 @@ export default function Index() {
     init();
   }, []);
 
+  // Listen for open-settings event from VoiceCallMode
+  useEffect(() => {
+    const handleOpenSettings = () => {
+      setSettingsOpen(true);
+    };
+    window.addEventListener('open-settings', handleOpenSettings);
+    return () => window.removeEventListener('open-settings', handleOpenSettings);
+  }, []);
+
   // Auto-scroll to bottom
   useEffect(() => {
     if (scrollRef.current) {
