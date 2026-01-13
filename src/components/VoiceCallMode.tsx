@@ -340,6 +340,39 @@ export function VoiceCallMode({
     startCall();
   };
 
+  // Keyboard shortcuts for voice call
+  useEffect(() => {
+    if (!isInCall) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      // Spacebar to toggle recording
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (callState === 'listening') {
+          stopListeningManually();
+        } else if (callState === 'speaking') {
+          // Stop TTS and start listening
+          stopSpeaking();
+          startListening();
+        }
+      }
+
+      // Escape to end call
+      if (e.code === 'Escape') {
+        e.preventDefault();
+        endCall();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isInCall, callState, stopListeningManually, startListening, endCall]);
+
   if (!isInCall) {
     return (
       <Button
@@ -384,9 +417,9 @@ export function VoiceCallMode({
         
         <p className="text-sm text-muted-foreground">
           {callState === 'loading' && loadingMessage}
-          {callState === 'listening' && 'Speak now - I\'ll hear you when you pause'}
+          {callState === 'listening' && 'Speak now - Press Space to send early'}
           {callState === 'processing' && 'Processing your voice...'}
-          {callState === 'speaking' && 'Wait for me to finish, then speak'}
+          {callState === 'speaking' && 'Press Space to interrupt • Esc to end call'}
         </p>
       </div>
 
@@ -434,6 +467,8 @@ export function VoiceCallMode({
       {/* Status info */}
       <p className="mt-8 text-xs text-muted-foreground text-center">
         🔒 100% offline • Local Whisper STT + Browser TTS
+        <br />
+        <span className="opacity-70">Space: toggle • Esc: end call</span>
       </p>
     </div>
   );
