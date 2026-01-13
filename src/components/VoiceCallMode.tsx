@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Phone, PhoneOff, Mic, Volume2, Loader2, MicOff } from 'lucide-react';
+import { Phone, PhoneOff, Mic, Volume2, Loader2, MicOff, Hand } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -11,6 +11,8 @@ import {
   getDownloadedModels 
 } from '@/lib/local-stt';
 import { speak, stopSpeaking, isTTSSupported } from '@/lib/tts';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 
 interface VoiceCallModeProps {
   onSendMessage: (message: string) => Promise<string>;
@@ -19,7 +21,7 @@ interface VoiceCallModeProps {
   disabled?: boolean;
 }
 
-type CallState = 'idle' | 'loading' | 'listening' | 'processing' | 'speaking';
+type CallState = 'idle' | 'loading' | 'listening' | 'processing' | 'speaking' | 'waiting';
 
 export function VoiceCallMode({ 
   onSendMessage, 
@@ -32,6 +34,11 @@ export function VoiceCallMode({
   const [transcript, setTranscript] = useState('');
   const [aiResponse, setAiResponse] = useState('');
   const [loadingMessage, setLoadingMessage] = useState('');
+  const [pushToTalk, setPushToTalk] = useState(() => {
+    const saved = localStorage.getItem('voice-push-to-talk');
+    return saved === 'true';
+  });
+  const [isHoldingSpace, setIsHoldingSpace] = useState(false);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -40,6 +47,13 @@ export function VoiceCallMode({
   const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const pushToTalkRef = useRef(pushToTalk);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    pushToTalkRef.current = pushToTalk;
+    localStorage.setItem('voice-push-to-talk', String(pushToTalk));
+  }, [pushToTalk]);
 
   // Check if voice call is available (need Whisper model + TTS)
   const whisperReady = isWhisperLoaded() || getDownloadedModels().length > 0;
@@ -136,8 +150,10 @@ export function VoiceCallMode({
         stream.getTracks().forEach(track => track.stop());
         
         if (audioChunksRef.current.length === 0) {
-          if (isCallActiveRef.current) {
+          if (isCallActiveRef.current && !pushToTalkRef.current) {
             setTimeout(() => startListening(), 500);
+          } else if (isCallActiveRef.current && pushToTalkRef.current) {
+            setCallState('waiting');
           }
           return;
         }
@@ -186,23 +202,40 @@ export function VoiceCallMode({
                 rate: ttsRate,
                 onEnd: () => {
                   if (isCallActiveRef.current) {
-                    // Continue the conversation loop
-                    setTimeout(() => startListening(), 300);
+                    if (pushToTalkRef.current) {
+                      // In push-to-talk mode, wait for user to press space
+                      setCallState('waiting');
+                    } else {
+                      // Continue the conversation loop
+                      setTimeout(() => startListening(), 300);
+                    }
                   }
                 },
               });
             } else if (isCallActiveRef.current) {
-              setTimeout(() => startListening(), 500);
+              if (pushToTalkRef.current) {
+                setCallState('waiting');
+              } else {
+                setTimeout(() => startListening(), 500);
+              }
             }
           } else if (isCallActiveRef.current) {
-            // No speech detected, restart
-            setTimeout(() => startListening(), 500);
+            // No speech detected
+            if (pushToTalkRef.current) {
+              setCallState('waiting');
+            } else {
+              setTimeout(() => startListening(), 500);
+            }
           }
         } catch (error) {
           console.error('Voice call error:', error);
           if (isCallActiveRef.current) {
             toast.error('Voice processing failed. Retrying...');
-            setTimeout(() => startListening(), 1000);
+            if (pushToTalkRef.current) {
+              setCallState('waiting');
+            } else {
+              setTimeout(() => startListening(), 1000);
+            }
           }
         }
       };
@@ -210,19 +243,22 @@ export function VoiceCallMode({
       mediaRecorderRef.current = mediaRecorder;
       mediaRecorder.start();
       
-      // Setup silence detection to auto-stop
-      detectSilence(stream, () => {
-        if (mediaRecorderRef.current?.state === 'recording') {
-          mediaRecorderRef.current.stop();
-        }
-      });
+      // Only setup silence detection if NOT in push-to-talk mode
+      if (!pushToTalkRef.current) {
+        detectSilence(stream, () => {
+          if (mediaRecorderRef.current?.state === 'recording') {
+            mediaRecorderRef.current.stop();
+          }
+        });
+      }
       
-      // Safety timeout - stop after 30 seconds max
+      // Safety timeout - stop after 30 seconds max (60s for push-to-talk)
+      const maxDuration = pushToTalkRef.current ? 60000 : 30000;
       silenceTimeoutRef.current = setTimeout(() => {
         if (mediaRecorderRef.current?.state === 'recording') {
           mediaRecorderRef.current.stop();
         }
-      }, 30000);
+      }, maxDuration);
       
     } catch (error) {
       console.error('Failed to start listening:', error);
@@ -272,10 +308,15 @@ export function VoiceCallMode({
       }
     }
     
-    toast.success('Voice call started - speak anytime', { duration: 2000 });
+    const modeText = pushToTalk ? 'Hold Space to talk' : 'Speak anytime';
+    toast.success(`Voice call started - ${modeText}`, { duration: 2000 });
     
-    // Start listening immediately
-    startListening();
+    // Start listening immediately (or wait for push-to-talk)
+    if (pushToTalk) {
+      setCallState('waiting');
+    } else {
+      startListening();
+    }
   }, [canMakeCall, startListening]);
 
   const endCall = useCallback(() => {
@@ -350,15 +391,29 @@ export function VoiceCallMode({
         return;
       }
 
-      // Spacebar to toggle recording
+      // Spacebar behavior
       if (e.code === 'Space') {
         e.preventDefault();
-        if (callState === 'listening') {
-          stopListeningManually();
-        } else if (callState === 'speaking') {
-          // Stop TTS and start listening
-          stopSpeaking();
-          startListening();
+        
+        if (pushToTalkRef.current) {
+          // Push-to-talk mode: start recording on keydown
+          if (callState === 'waiting' && !isHoldingSpace) {
+            setIsHoldingSpace(true);
+            startListening();
+          } else if (callState === 'speaking') {
+            // Interrupt TTS and start listening
+            stopSpeaking();
+            setIsHoldingSpace(true);
+            startListening();
+          }
+        } else {
+          // Auto-detect mode: toggle recording
+          if (callState === 'listening') {
+            stopListeningManually();
+          } else if (callState === 'speaking') {
+            stopSpeaking();
+            startListening();
+          }
         }
       }
 
@@ -369,9 +424,29 @@ export function VoiceCallMode({
       }
     };
 
+    const handleKeyUp = (e: KeyboardEvent) => {
+      // Ignore if user is typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      // Push-to-talk: stop recording on key release
+      if (e.code === 'Space' && pushToTalkRef.current && isHoldingSpace) {
+        e.preventDefault();
+        setIsHoldingSpace(false);
+        if (callState === 'listening') {
+          stopListeningManually();
+        }
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isInCall, callState, stopListeningManually, startListening, endCall]);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [isInCall, callState, isHoldingSpace, stopListeningManually, startListening, endCall]);
 
   if (!isInCall) {
     return (
@@ -393,6 +468,19 @@ export function VoiceCallMode({
 
   return (
     <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex flex-col items-center justify-center p-6">
+      {/* Mode toggle */}
+      <div className="absolute top-6 right-6 flex items-center gap-3 bg-muted/50 rounded-full px-4 py-2 border border-border">
+        <Label htmlFor="push-to-talk" className="text-sm text-muted-foreground cursor-pointer flex items-center gap-2">
+          <Hand className="w-4 h-4" />
+          Push to Talk
+        </Label>
+        <Switch
+          id="push-to-talk"
+          checked={pushToTalk}
+          onCheckedChange={setPushToTalk}
+        />
+      </div>
+
       {/* Call status indicator */}
       <div className="text-center mb-8">
         <div className={cn(
@@ -400,26 +488,30 @@ export function VoiceCallMode({
           callState === 'loading' && 'bg-blue-500/20',
           callState === 'listening' && 'bg-green-500/20 animate-pulse ring-4 ring-green-500/30',
           callState === 'processing' && 'bg-yellow-500/20',
-          callState === 'speaking' && 'bg-primary/20 animate-pulse ring-4 ring-primary/30'
+          callState === 'speaking' && 'bg-primary/20 animate-pulse ring-4 ring-primary/30',
+          callState === 'waiting' && 'bg-muted/50 border-2 border-dashed border-muted-foreground/30'
         )}>
           {callState === 'loading' && <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />}
           {callState === 'listening' && <Mic className="w-12 h-12 text-green-500" />}
           {callState === 'processing' && <Loader2 className="w-12 h-12 text-yellow-500 animate-spin" />}
           {callState === 'speaking' && <Volume2 className="w-12 h-12 text-primary" />}
+          {callState === 'waiting' && <Hand className="w-12 h-12 text-muted-foreground" />}
         </div>
         
         <p className="text-xl font-medium mb-2">
           {callState === 'loading' && 'Getting Ready...'}
-          {callState === 'listening' && 'Listening...'}
+          {callState === 'listening' && (pushToTalk ? 'Recording...' : 'Listening...')}
           {callState === 'processing' && 'Thinking...'}
           {callState === 'speaking' && 'Speaking...'}
+          {callState === 'waiting' && 'Ready'}
         </p>
         
         <p className="text-sm text-muted-foreground">
           {callState === 'loading' && loadingMessage}
-          {callState === 'listening' && 'Speak now - Press Space to send early'}
+          {callState === 'listening' && (pushToTalk ? 'Release Space when done' : 'Speak now - Press Space to send early')}
           {callState === 'processing' && 'Processing your voice...'}
           {callState === 'speaking' && 'Press Space to interrupt • Esc to end call'}
+          {callState === 'waiting' && 'Hold Space to speak'}
         </p>
       </div>
 
@@ -441,7 +533,7 @@ export function VoiceCallMode({
 
       {/* Call controls */}
       <div className="flex gap-4">
-        {callState === 'listening' && (
+        {callState === 'listening' && !pushToTalk && (
           <Button
             variant="secondary"
             size="lg"
@@ -450,6 +542,46 @@ export function VoiceCallMode({
           >
             <MicOff className="w-5 h-5 mr-2" />
             Done Speaking
+          </Button>
+        )}
+        
+        {callState === 'waiting' && pushToTalk && (
+          <Button
+            variant="secondary"
+            size="lg"
+            className="rounded-full px-6"
+            onMouseDown={() => {
+              setIsHoldingSpace(true);
+              startListening();
+            }}
+            onMouseUp={() => {
+              setIsHoldingSpace(false);
+              stopListeningManually();
+            }}
+            onMouseLeave={() => {
+              if (isHoldingSpace) {
+                setIsHoldingSpace(false);
+                stopListeningManually();
+              }
+            }}
+          >
+            <Mic className="w-5 h-5 mr-2" />
+            Hold to Talk
+          </Button>
+        )}
+        
+        {callState === 'listening' && pushToTalk && (
+          <Button
+            variant="default"
+            size="lg"
+            className="rounded-full px-6 bg-green-600 hover:bg-green-700"
+            onMouseUp={() => {
+              setIsHoldingSpace(false);
+              stopListeningManually();
+            }}
+          >
+            <Mic className="w-5 h-5 mr-2 animate-pulse" />
+            Recording...
           </Button>
         )}
         
@@ -468,7 +600,9 @@ export function VoiceCallMode({
       <p className="mt-8 text-xs text-muted-foreground text-center">
         🔒 100% offline • Local Whisper STT + Browser TTS
         <br />
-        <span className="opacity-70">Space: toggle • Esc: end call</span>
+        <span className="opacity-70">
+          {pushToTalk ? 'Hold Space: record • Esc: end call' : 'Space: toggle • Esc: end call'}
+        </span>
       </p>
     </div>
   );
