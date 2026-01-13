@@ -1,9 +1,14 @@
 // Local Speech-to-Text using Hugging Face Transformers (Whisper)
 import { pipeline, env } from '@huggingface/transformers';
 
-// Configure transformers.js
-env.allowLocalModels = true;
+// Configure transformers.js for browser use
+env.allowLocalModels = false; // Must be false for browser - we download from HF
 env.useBrowserCache = true;
+
+// Use the official Hugging Face CDN which has proper CORS headers
+// This is required for browser environments where direct HF API access is blocked
+env.remoteHost = 'https://huggingface.co';
+env.remotePathTemplate = '{model}/resolve/{revision}/';
 
 export interface WhisperModel {
   id: string;
