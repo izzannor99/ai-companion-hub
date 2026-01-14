@@ -11,6 +11,7 @@ import { TypingIndicator } from '@/components/TypingIndicator';
 import { EmptyState } from '@/components/EmptyState';
 import { NetworkStatusIndicator } from '@/components/NetworkStatusIndicator';
 import { VoiceCallMode } from '@/components/VoiceCallMode';
+import { CodeLibrary } from '@/components/CodeLibrary';
 import {
   Conversation,
   Message,
@@ -38,6 +39,7 @@ export default function Index() {
   const [streamingContent, setStreamingContent] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [codeLibraryOpen, setCodeLibraryOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const chatInputRef = useRef<ChatInputRef>(null);
@@ -313,6 +315,7 @@ export default function Index() {
           onOpenSettings={() => setSettingsOpen(true)}
           onExport={handleExport}
           onImport={handleImport}
+          onOpenCodeLibrary={() => setCodeLibraryOpen(true)}
         />
       </div>
 
@@ -395,6 +398,13 @@ export default function Index() {
         settings={settings}
         onSave={handleSettingsSave}
       />
+
+      {/* Code Library panel */}
+      {codeLibraryOpen && (
+        <div className="fixed inset-y-0 right-0 w-80 z-50 shadow-xl">
+          <CodeLibrary onClose={() => setCodeLibraryOpen(false)} />
+        </div>
+      )}
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { Message } from '@/lib/db';
 import { cn } from '@/lib/utils';
 import { speak, stopSpeaking, isTTSSupported } from '@/lib/tts';
 import ReactMarkdown from 'react-markdown';
+import { CodeBlock } from '@/components/CodeBlock';
 
 interface ChatMessageProps {
   message: Message;
@@ -114,14 +115,25 @@ export function ChatMessage({ message, onEdit, onDelete }: ChatMessageProps) {
               <div className="prose prose-invert prose-sm max-w-none">
                 <ReactMarkdown
                   components={{
-                    code: ({ className, children, ...props }) => {
-                      const isInline = !className;
-                      return isInline ? (
+                    code: ({ className, children, node, ...props }) => {
+                      const match = /language-(\w+)/.exec(className || '');
+                      const codeString = String(children).replace(/\n$/, '');
+                      
+                      // Check if it's a code block (has language or multiple lines)
+                      const isBlock = match || codeString.includes('\n') || codeString.length > 100;
+                      
+                      if (isBlock) {
+                        return (
+                          <CodeBlock
+                            code={codeString}
+                            language={match?.[1]}
+                            className="my-3"
+                          />
+                        );
+                      }
+                      
+                      return (
                         <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
-                          {children}
-                        </code>
-                      ) : (
-                        <code className="block bg-muted p-3 rounded-lg text-sm font-mono overflow-x-auto" {...props}>
                           {children}
                         </code>
                       );
