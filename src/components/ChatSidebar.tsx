@@ -1,10 +1,13 @@
-import { useState } from 'react';
-import { Plus, Search, MessageSquare, Trash2, Settings, Download, Upload } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Plus, Search, MessageSquare, Trash2, Settings, Download, Upload, Code2, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Conversation } from '@/lib/db';
 import { cn } from '@/lib/utils';
+import { getAllSnippets, type CodeSnippet } from '@/lib/code-snippets-db';
+import { isFileSystemSupported, openDirectory, getCurrentDirectory } from '@/lib/file-system';
+import { useToast } from '@/hooks/use-toast';
 
 interface ChatSidebarProps {
   conversations: Conversation[];
@@ -15,6 +18,7 @@ interface ChatSidebarProps {
   onOpenSettings: () => void;
   onExport: () => void;
   onImport: () => void;
+  onOpenCodeLibrary?: () => void;
 }
 
 export function ChatSidebar({
@@ -26,8 +30,50 @@ export function ChatSidebar({
   onOpenSettings,
   onExport,
   onImport,
+  onOpenCodeLibrary,
 }: ChatSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [snippetCount, setSnippetCount] = useState(0);
+  const [projectFolder, setProjectFolder] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    const loadSnippetCount = async () => {
+      const snippets = await getAllSnippets();
+      setSnippetCount(snippets.length);
+    };
+    loadSnippetCount();
+
+    // Listen for new snippets
+    const handleSaved = () => loadSnippetCount();
+    window.addEventListener('snippet-saved', handleSaved);
+
+    // Check for existing directory handle
+    const dir = getCurrentDirectory();
+    if (dir) setProjectFolder(dir.name);
+
+    return () => window.removeEventListener('snippet-saved', handleSaved);
+  }, []);
+
+  const handleOpenProject = async () => {
+    if (!isFileSystemSupported()) {
+      toast({
+        variant: 'destructive',
+        title: 'File System Access not supported',
+        description: 'Use Chrome, Edge, or another Chromium browser',
+      });
+      return;
+    }
+    try {
+      const dir = await openDirectory();
+      if (dir) {
+        setProjectFolder(dir.name);
+        toast({ title: `Opened: ${dir.name}` });
+      }
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: error.message });
+    }
+  };
 
   const filtered = searchQuery
     ? conversations.filter(c =>
@@ -125,6 +171,37 @@ export function ChatSidebar({
 
       {/* Footer actions */}
       <div className="p-4 border-t border-sidebar-border space-y-2">
+        {/* Project folder */}
+        {isFileSystemSupported() && (
+          <Button
+            variant="ghost"
+            className="w-full justify-start text-left"
+            onClick={handleOpenProject}
+          >
+            <FolderOpen className="w-4 h-4 mr-2 shrink-0" />
+            <span className="truncate">
+              {projectFolder || 'Open Project Folder'}
+            </span>
+          </Button>
+        )}
+
+        {/* Code Library */}
+        {onOpenCodeLibrary && (
+          <Button
+            variant="ghost"
+            className="w-full justify-start"
+            onClick={onOpenCodeLibrary}
+          >
+            <Code2 className="w-4 h-4 mr-2" />
+            Code Library
+            {snippetCount > 0 && (
+              <span className="ml-auto text-xs bg-primary/20 text-primary px-1.5 py-0.5 rounded-full">
+                {snippetCount}
+              </span>
+            )}
+          </Button>
+        )}
+
         <div className="flex gap-2">
           <Button
             variant="ghost"
