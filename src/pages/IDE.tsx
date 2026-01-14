@@ -1,17 +1,29 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FileTree } from '@/components/ide/FileTree';
 import { CodeEditor } from '@/components/ide/CodeEditor';
 import { PreviewPane } from '@/components/ide/PreviewPane';
 import { IDEChat } from '@/components/ide/IDEChat';
 import { ConnectionIndicator } from '@/components/ide/ConnectionIndicator';
-import { IDESettings as IDESettingsType, Project, ProjectFile, DEFAULT_SETTINGS } from '@/lib/ide-types';
-import { getIDESettings, saveIDESettings, getProjects, saveProject, createProject, generateId } from '@/lib/ide-store';
+import { SystemCommandPanel } from '@/components/ide/SystemCommandPanel';
+import { PluginManager } from '@/components/ide/PluginManager';
+import { IDESettings as IDESettingsType, Project, ProjectFile, Plugin, DEFAULT_SETTINGS } from '@/lib/ide-types';
+import { getIDESettings, saveIDESettings, getProjects, saveProject, createProject, generateId, getPlugins } from '@/lib/ide-store';
 import { isOllamaRunning, streamChat, ChatMessage } from '@/lib/ollama-client';
+import { SystemCommand, parseCommandFromAIResponse, executeCommand } from '@/lib/system-commands';
+import { downloadProjectAsZip, downloadStartupScript, generateDocumentation } from '@/lib/project-export';
 import { Button } from '@/components/ui/button';
-import { Settings, FolderPlus } from 'lucide-react';
+import { Settings, FolderPlus, Download, FileText, Play, Square, Terminal, Plug, Home } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 interface Message extends ChatMessage {
   id: string;
@@ -31,10 +43,16 @@ export default function IDE() {
   const [isServerRunning, setIsServerRunning] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
+  const [systemCommands, setSystemCommands] = useState<SystemCommand[]>([]);
+  const [plugins, setPlugins] = useState<Plugin[]>([]);
+  const [rightPanelTab, setRightPanelTab] = useState<'preview' | 'commands' | 'plugins'>('preview');
+  const [codeLibraryOpen, setCodeLibraryOpen] = useState(false);
 
-  // Load settings and check Ollama
+  // Load settings, plugins, and check Ollama
   useEffect(() => {
     setSettings(getIDESettings());
+    setPlugins(getPlugins());
+    
     const checkOllama = async () => {
       const connected = await isOllamaRunning();
       setOllamaConnected(connected);
@@ -55,6 +73,17 @@ export default function IDE() {
       setProject(projects[0]);
     }
   }, []);
+
+  // Update right panel based on mode
+  useEffect(() => {
+    if (settings.mode === 'system-helper') {
+      setRightPanelTab('commands');
+    } else if (settings.mode === 'plugin') {
+      setRightPanelTab('plugins');
+    } else {
+      setRightPanelTab('preview');
+    }
+  }, [settings.mode]);
 
   const handleSelectFile = useCallback((file: ProjectFile) => {
     if (!file.isDirectory) {
@@ -107,24 +136,124 @@ export default function IDE() {
       const assistantMessage: Message = { id: generateId(), role: 'assistant', content: fullResponse, timestamp: Date.now() };
       setMessages(prev => [...prev, assistantMessage]);
       setStreamingContent('');
+
+      // Parse system commands if in system-helper mode
+      if (settings.mode === 'system-helper') {
+        const commands = parseCommandFromAIResponse(fullResponse);
+        if (commands.length > 0) {
+          setSystemCommands(prev => [...prev, ...commands]);
+          setRightPanelTab('commands');
+          toast.info(`${commands.length} command(s) need review`);
+        }
+      }
     } catch (error) {
       toast.error('Failed to get response. Check Ollama connection.');
       console.error(error);
     } finally {
       setIsLoading(false);
     }
-  }, [messages]);
+  }, [messages, settings.mode]);
+
+  // System command handlers
+  const handleApproveCommand = (id: string) => {
+    setSystemCommands(prev => prev.map(c => c.id === id ? { ...c, status: 'approved' as const } : c));
+  };
+
+  const handleRejectCommand = (id: string) => {
+    setSystemCommands(prev => prev.map(c => c.id === id ? { ...c, status: 'rejected' as const } : c));
+  };
+
+  const handleExecuteCommand = async (id: string) => {
+    setSystemCommands(prev => prev.map(c => c.id === id ? { ...c, status: 'running' as const } : c));
+    
+    const command = systemCommands.find(c => c.id === id);
+    if (command) {
+      const result = await executeCommand(command);
+      setSystemCommands(prev => prev.map(c => c.id === id ? result : c));
+    }
+  };
+
+  const handleClearCommands = () => {
+    setSystemCommands([]);
+  };
+
+  // Download handlers
+  const handleDownloadZip = async () => {
+    if (!project) return;
+    try {
+      await downloadProjectAsZip(project);
+      toast.success('Project downloaded');
+    } catch (error) {
+      toast.error('Failed to download project');
+    }
+  };
+
+  const handleDownloadStartupScript = (platform: 'windows' | 'linux' | 'macos') => {
+    downloadStartupScript(settings, platform);
+    toast.success(`Startup script for ${platform} downloaded`);
+  };
+
+  const handleDownloadDocs = () => {
+    if (!project) return;
+    const docs = generateDocumentation(project, settings);
+    const blob = new Blob([docs], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'README.md';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success('Documentation downloaded');
+  };
 
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
       <header className="h-12 flex items-center justify-between px-4 border-b border-border bg-card">
         <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
+            <Home className="h-5 w-5" />
+          </Button>
           <h1 className="text-lg font-bold gradient-text">LocalDev AI</h1>
           <span className="text-sm text-muted-foreground">{project?.name || 'No Project'}</span>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
           <ConnectionIndicator mode={settings.connectionMode} ollamaConnected={ollamaConnected} />
+          
+          {/* Download menu */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon">
+                <Download className="h-5 w-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleDownloadZip}>
+                <FileText className="h-4 w-4 mr-2" />
+                Download as ZIP
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleDownloadDocs}>
+                <FileText className="h-4 w-4 mr-2" />
+                Download Documentation
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => handleDownloadStartupScript('windows')}>
+                <Terminal className="h-4 w-4 mr-2" />
+                Startup Script (Windows)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleDownloadStartupScript('linux')}>
+                <Terminal className="h-4 w-4 mr-2" />
+                Startup Script (Linux)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleDownloadStartupScript('macos')}>
+                <Terminal className="h-4 w-4 mr-2" />
+                Startup Script (macOS)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          
           <Button variant="ghost" size="icon" onClick={() => navigate('/settings')}>
             <Settings className="h-5 w-5" />
           </Button>
@@ -142,7 +271,7 @@ export default function IDE() {
             streamingContent={streamingContent}
             mode={settings.mode}
             onOpenSettings={() => navigate('/settings')}
-            onToggleCodeLibrary={() => {}}
+            onToggleCodeLibrary={() => setCodeLibraryOpen(!codeLibraryOpen)}
           />
         </ResizablePanel>
         
@@ -174,16 +303,62 @@ export default function IDE() {
         
         <ResizableHandle withHandle />
         
-        {/* Preview Panel */}
+        {/* Right Panel - Preview/Commands/Plugins */}
         <ResizablePanel defaultSize={30} minSize={20}>
-          <PreviewPane
-            isServerRunning={isServerRunning}
-            logs={logs}
-            errors={errors}
-            onRefresh={() => {}}
-            onStartServer={() => { setIsServerRunning(true); setLogs(['Starting dev server...']); }}
-            onStopServer={() => setIsServerRunning(false)}
-          />
+          <div className="h-full flex flex-col">
+            <Tabs value={rightPanelTab} onValueChange={(v) => setRightPanelTab(v as typeof rightPanelTab)} className="flex-1 flex flex-col">
+              <TabsList className="w-full justify-start rounded-none border-b border-border bg-card px-2">
+                <TabsTrigger value="preview" className="gap-1">
+                  <Play className="h-3 w-3" />
+                  Preview
+                </TabsTrigger>
+                <TabsTrigger value="commands" className="gap-1">
+                  <Terminal className="h-3 w-3" />
+                  Commands
+                  {systemCommands.filter(c => c.status === 'pending').length > 0 && (
+                    <span className="ml-1 px-1.5 py-0.5 text-xs bg-amber-500 text-white rounded-full">
+                      {systemCommands.filter(c => c.status === 'pending').length}
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="plugins" className="gap-1">
+                  <Plug className="h-3 w-3" />
+                  Plugins
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="preview" className="flex-1 m-0">
+                <PreviewPane
+                  isServerRunning={isServerRunning}
+                  logs={logs}
+                  errors={errors}
+                  onRefresh={() => {}}
+                  onStartServer={() => {
+                    setIsServerRunning(true);
+                    setLogs(['Starting dev server...', 'Server running on http://localhost:5173']);
+                  }}
+                  onStopServer={() => setIsServerRunning(false)}
+                />
+              </TabsContent>
+              
+              <TabsContent value="commands" className="flex-1 m-0">
+                <SystemCommandPanel
+                  commands={systemCommands}
+                  onApprove={handleApproveCommand}
+                  onReject={handleRejectCommand}
+                  onExecute={handleExecuteCommand}
+                  onClear={handleClearCommands}
+                />
+              </TabsContent>
+              
+              <TabsContent value="plugins" className="flex-1 m-0">
+                <PluginManager
+                  plugins={plugins}
+                  onPluginsChange={setPlugins}
+                />
+              </TabsContent>
+            </Tabs>
+          </div>
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>

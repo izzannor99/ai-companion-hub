@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
-import { Send, Mic, MicOff, Settings, FolderOpen, Library, Loader2 } from 'lucide-react';
+import { Send, Mic, MicOff, Settings, Library, Loader2, Volume2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -8,6 +8,8 @@ import { ChatMessage as ChatMessageType } from '@/lib/ollama-client';
 import { IDEMode, MODE_INFO } from '@/lib/ide-types';
 import { Badge } from '@/components/ui/badge';
 import ReactMarkdown from 'react-markdown';
+import { isWhisperLoaded, getDownloadedModels, transcribeAudio, loadWhisperModel, getSelectedWhisperModel } from '@/lib/local-stt';
+import { toast } from 'sonner';
 
 interface Message extends ChatMessageType {
   id: string;
@@ -37,10 +39,27 @@ export function IDEChat({
 }: IDEChatProps) {
   const [input, setInput] = useState('');
   const [isRecording, setIsRecording] = useState(false);
-  const [isHoldingSpace, setIsHoldingSpace] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [whisperReady, setWhisperReady] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const modeInfo = MODE_INFO[mode];
+
+  // Check Whisper availability
+  useEffect(() => {
+    const checkWhisper = () => {
+      const loaded = isWhisperLoaded();
+      const downloaded = getDownloadedModels().length > 0;
+      setWhisperReady(loaded || downloaded);
+    };
+    checkWhisper();
+
+    const handleModelChange = () => checkWhisper();
+    window.addEventListener('whisper-model-changed', handleModelChange);
+    return () => window.removeEventListener('whisper-model-changed', handleModelChange);
+  }, []);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -49,23 +68,94 @@ export function IDEChat({
     }
   }, [messages, streamingContent]);
 
+  // Start recording
+  const startRecording = useCallback(async () => {
+    if (!whisperReady) {
+      toast.info('Voice requires a Whisper model. Go to Settings to download one.', {
+        action: {
+          label: 'Settings',
+          onClick: onOpenSettings,
+        },
+      });
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        await transcribeRecording(audioBlob);
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (error) {
+      console.error('Failed to start recording:', error);
+      toast.error('Failed to access microphone');
+    }
+  }, [whisperReady, onOpenSettings]);
+
+  // Stop recording
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  }, [isRecording]);
+
+  // Transcribe audio
+  const transcribeRecording = async (audioBlob: Blob) => {
+    setIsTranscribing(true);
+    try {
+      // Ensure model is loaded
+      if (!isWhisperLoaded()) {
+        const modelId = getSelectedWhisperModel();
+        toast.loading('Loading Whisper model...', { id: 'whisper-loading' });
+        await loadWhisperModel(modelId);
+        toast.dismiss('whisper-loading');
+      }
+
+      const text = await transcribeAudio(audioBlob);
+      if (text.trim()) {
+        setInput(prev => prev + (prev ? ' ' : '') + text.trim());
+      }
+    } catch (error) {
+      console.error('Transcription failed:', error);
+      toast.error('Failed to transcribe audio');
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
   // Push-to-talk with spacebar
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !isHoldingSpace && document.activeElement !== textareaRef.current) {
+      if (
+        e.code === 'Space' &&
+        !isRecording &&
+        document.activeElement !== textareaRef.current &&
+        !e.repeat
+      ) {
         e.preventDefault();
-        setIsHoldingSpace(true);
-        setIsRecording(true);
-        // Start recording logic here
+        startRecording();
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && isHoldingSpace) {
+      if (e.code === 'Space' && isRecording) {
         e.preventDefault();
-        setIsHoldingSpace(false);
-        setIsRecording(false);
-        // Stop recording and transcribe logic here
+        stopRecording();
       }
     };
 
@@ -76,7 +166,7 @@ export function IDEChat({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [isHoldingSpace]);
+  }, [isRecording, startRecording, stopRecording]);
 
   const handleSubmit = useCallback(() => {
     if (input.trim() && !isLoading) {
@@ -89,6 +179,14 @@ export function IDEChat({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
+    }
+  };
+
+  const toggleRecording = () => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
     }
   };
 
@@ -182,6 +280,26 @@ export function IDEChat({
         </div>
       </ScrollArea>
 
+      {/* Recording indicator */}
+      {isRecording && (
+        <div className="px-4 py-2 bg-red-500/10 border-t border-red-500/20">
+          <div className="flex items-center justify-center gap-2 text-red-500">
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+            <span className="text-sm font-medium">Recording... Release Space to stop</span>
+          </div>
+        </div>
+      )}
+
+      {/* Transcribing indicator */}
+      {isTranscribing && (
+        <div className="px-4 py-2 bg-primary/10 border-t border-primary/20">
+          <div className="flex items-center justify-center gap-2 text-primary">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span className="text-sm font-medium">Transcribing...</span>
+          </div>
+        </div>
+      )}
+
       {/* Input */}
       <div className="p-4 border-t border-sidebar-border">
         <div className="relative">
@@ -199,10 +317,12 @@ export function IDEChat({
               variant="ghost"
               size="icon"
               className={cn(
-                'h-8 w-8 rounded-full',
-                isRecording && 'bg-red-500/20 text-red-500'
+                'h-8 w-8 rounded-full transition-colors',
+                isRecording && 'bg-red-500/20 text-red-500 animate-pulse',
+                !isRecording && whisperReady && 'text-green-500 hover:bg-green-500/20'
               )}
-              onClick={() => setIsRecording(!isRecording)}
+              onClick={toggleRecording}
+              disabled={isTranscribing}
             >
               {isRecording ? (
                 <MicOff className="h-4 w-4" />
@@ -221,8 +341,8 @@ export function IDEChat({
           </div>
         </div>
         <p className="text-xs text-muted-foreground mt-2 text-center">
-          Press <kbd className="px-1 py-0.5 bg-muted rounded text-xs">Enter</kbd> to send,{' '}
-          <kbd className="px-1 py-0.5 bg-muted rounded text-xs">Shift+Enter</kbd> for new line
+          Press <kbd className="px-1 py-0.5 bg-muted rounded text-xs">Enter</kbd> to send •{' '}
+          Hold <kbd className="px-1 py-0.5 bg-muted rounded text-xs">Space</kbd> to talk
         </p>
       </div>
     </div>
