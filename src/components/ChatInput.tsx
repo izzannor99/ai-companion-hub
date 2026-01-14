@@ -9,7 +9,8 @@ import {
   isWhisperLoaded, 
   loadWhisperModel, 
   transcribeAudio, 
-  getSelectedWhisperModel 
+  getSelectedWhisperModel,
+  getDownloadedModels
 } from '@/lib/local-stt';
 
 interface ChatInputProps {
@@ -68,20 +69,24 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
     const pendingMessageRef = useRef('');
     const { isOnline } = useNetworkStatus();
 
-    // Check if local Whisper is available
-    const [whisperAvailable, setWhisperAvailable] = useState(false);
+    // Check if local Whisper is available (same check as phone button)
+    const [whisperAvailable, setWhisperAvailable] = useState(() => {
+      return isWhisperLoaded() || getDownloadedModels().length > 0;
+    });
     
     useEffect(() => {
-      // Check if Whisper model is loaded
-      setWhisperAvailable(isWhisperLoaded());
+      // Update whisper availability when models change
+      const checkWhisper = () => {
+        setWhisperAvailable(isWhisperLoaded() || getDownloadedModels().length > 0);
+      };
+      checkWhisper();
+      // Listen for model changes
+      window.addEventListener('whisper-model-changed', checkWhisper);
+      return () => window.removeEventListener('whisper-model-changed', checkWhisper);
     }, []);
 
-    // Check if browser speech recognition is supported
-    const isBrowserSpeechSupported = typeof window !== 'undefined' && 
-      ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
-
-    // Voice input is supported if either browser speech (online) or local Whisper is available
-    const isVoiceSupported = isBrowserSpeechSupported || whisperAvailable;
+    // Voice input is always shown - uses local Whisper only (like phone button)
+    const isVoiceSupported = true;
 
     // Expose methods via ref
     useImperativeHandle(ref, () => ({
@@ -105,87 +110,8 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
       }
     }, [message]);
 
-    // Initialize browser speech recognition (for online use)
-    useEffect(() => {
-      if (!isBrowserSpeechSupported) {
-        console.log('Browser speech recognition not supported');
-        return;
-      }
-
-      try {
-        const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
-        const recognition = new SpeechRecognitionAPI();
-        
-        recognition.continuous = false; // Stop after each phrase for auto-send
-        recognition.interimResults = true;
-        recognition.lang = 'en-US';
-
-        recognition.onstart = () => {
-          console.log('Speech recognition started');
-        };
-
-        recognition.onresult = (event: SpeechRecognitionEvent) => {
-          let finalTranscript = '';
-          let interimTranscript = '';
-
-          for (let i = event.resultIndex; i < event.results.length; i++) {
-            const transcript = event.results[i][0].transcript;
-            if (event.results[i].isFinal) {
-              finalTranscript += transcript;
-            } else {
-              interimTranscript += transcript;
-            }
-          }
-
-          if (finalTranscript) {
-            pendingMessageRef.current = finalTranscript.trim();
-            setMessage(finalTranscript.trim());
-          } else if (interimTranscript) {
-            setMessage(interimTranscript);
-          }
-        };
-
-        recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-          console.error('Speech recognition error:', event.error, event.message);
-          setIsRecording(false);
-          
-          if (event.error === 'not-allowed') {
-            toast.error('Microphone access denied. Please allow microphone access in your browser settings.');
-          } else if (event.error === 'network') {
-            toast.error('Voice input requires internet (browser limitation). Your chat messages still work offline with local AI.');
-          } else if (event.error === 'no-speech') {
-            // Silent fail for no-speech - user just didn't say anything
-            console.log('No speech detected');
-          } else if (event.error !== 'aborted') {
-            toast.error(`Speech recognition error: ${event.error}`);
-          }
-        };
-
-        recognition.onend = () => {
-          console.log('Speech recognition ended');
-          setIsRecording(false);
-          // Auto-send if we have a pending message and autoSendOnVoice is enabled
-          if (autoSendOnVoice && pendingMessageRef.current) {
-            const msg = pendingMessageRef.current;
-            pendingMessageRef.current = '';
-            setMessage('');
-            onSend(msg);
-          }
-        };
-
-        recognitionRef.current = recognition;
-
-        return () => {
-          try {
-            recognition.abort();
-          } catch (e) {
-            // Ignore errors on cleanup
-          }
-        };
-      } catch (err) {
-        console.error('Failed to initialize speech recognition:', err);
-      }
-    }, [isBrowserSpeechSupported, autoSendOnVoice, onSend]);
+    // Local Whisper is the only voice input method (like phone button)
+    // Browser speech recognition removed for consistency
 
     // Start recording with local Whisper (for offline use)
     const startLocalRecording = useCallback(async () => {
@@ -290,31 +216,24 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
         return;
       }
 
-      // Decide which method to use: local Whisper or browser speech API
-      const useLocalWhisper = !isOnline || whisperAvailable;
-
-      if (useLocalWhisper && whisperAvailable) {
-        // Use local Whisper for offline transcription
-        startLocalRecording();
-      } else if (isOnline && isBrowserSpeechSupported && recognitionRef.current) {
-        // Use browser speech API (requires internet)
-        try {
-          pendingMessageRef.current = '';
-          setMessage('');
-          recognitionRef.current.start();
-          setIsRecording(true);
-          toast.success('Listening...', { duration: 1500 });
-        } catch (err) {
-          console.error('Failed to start recording:', err);
-          toast.error('Failed to start voice input');
-        }
-      } else if (!isOnline && !whisperAvailable) {
-        // Offline but no Whisper model
-        toast.error('Download a Whisper model in Settings → Voice for offline voice input');
-      } else {
-        toast.error('Voice input not available. Download Whisper model in Settings.');
+      // Check if Whisper model is available (same as phone button)
+      if (!whisperAvailable) {
+        toast.info('Download a voice model first', {
+          description: 'Go to Settings → Voice Models to download Whisper for offline speech recognition.',
+          action: {
+            label: 'Open Settings',
+            onClick: () => {
+              window.dispatchEvent(new CustomEvent('open-settings', { detail: { tab: 'voicemodels' } }));
+            }
+          },
+          duration: 5000,
+        });
+        return;
       }
-    }, [isRecording, isOnline, whisperAvailable, isBrowserSpeechSupported, startLocalRecording, stopRecording]);
+
+      // Use local Whisper for transcription
+      startLocalRecording();
+    }, [isRecording, whisperAvailable, startLocalRecording, stopRecording]);
 
     return (
       <div className="p-4 border-t border-border bg-card/50">
@@ -338,16 +257,18 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
                   variant="ghost"
                   size="icon"
                   className={cn(
-                    'rounded-full transition-colors',
+                    'rounded-full transition-all',
                     isRecording && 'bg-destructive text-destructive-foreground animate-pulse-glow',
-                    isTranscribing && 'bg-primary/20'
+                    isTranscribing && 'bg-primary/20',
+                    !isRecording && !isTranscribing && whisperAvailable && 'text-green-500 hover:text-green-400 hover:bg-green-500/10',
+                    !isRecording && !isTranscribing && !whisperAvailable && 'text-muted-foreground hover:text-foreground'
                   )}
                   onClick={toggleRecording}
                   disabled={isLoading || isTranscribing}
                   title={
                     isTranscribing ? "Transcribing..." :
                     isRecording ? "Stop listening" : 
-                    whisperAvailable ? "Voice input (offline)" : "Voice input"
+                    whisperAvailable ? "Voice input (offline)" : "Setup required - click to learn more"
                   }
                 >
                   {isTranscribing ? (
