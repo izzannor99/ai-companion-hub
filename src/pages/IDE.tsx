@@ -8,13 +8,17 @@ import { IDEChat } from '@/components/ide/IDEChat';
 import { ConnectionIndicator } from '@/components/ide/ConnectionIndicator';
 import { SystemCommandPanel } from '@/components/ide/SystemCommandPanel';
 import { PluginManager } from '@/components/ide/PluginManager';
+import { Terminal } from '@/components/ide/Terminal';
+import { TTSControls } from '@/components/ide/TTSControls';
 import { IDESettings as IDESettingsType, Project, ProjectFile, Plugin, DEFAULT_SETTINGS } from '@/lib/ide-types';
 import { getIDESettings, saveIDESettings, getProjects, saveProject, createProject, generateId, getPlugins } from '@/lib/ide-store';
 import { isOllamaRunning, streamChat, ChatMessage } from '@/lib/ollama-client';
-import { SystemCommand, parseCommandFromAIResponse, executeCommand } from '@/lib/system-commands';
+import { SystemCommand, parseCommandFromAIResponse, executeCommand as executeSystemCommand } from '@/lib/system-commands';
 import { downloadProjectAsZip, downloadStartupScript, generateDocumentation } from '@/lib/project-export';
+import { checkAgentStatus, downloadAgentScript, startDevServer, stopDevServer, AgentStatus, onOutput } from '@/lib/local-backend-agent';
+import { initTTS, speakAIResponse, getTTSSettings } from '@/lib/tts-engine';
 import { Button } from '@/components/ui/button';
-import { Settings, FolderPlus, Download, FileText, Play, Square, Terminal, Plug, Home } from 'lucide-react';
+import { Settings, FolderPlus, Download, FileText, Play, Square, Terminal as TerminalIcon, Plug, Home, Bot, MonitorDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -37,29 +41,49 @@ export default function IDE() {
   const [selectedFile, setSelectedFile] = useState<ProjectFile | null>(null);
   const [openFiles, setOpenFiles] = useState<ProjectFile[]>([]);
   const [ollamaConnected, setOllamaConnected] = useState(false);
+  const [agentStatus, setAgentStatus] = useState<AgentStatus>({ connected: false });
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [isServerRunning, setIsServerRunning] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | undefined>();
   const [logs, setLogs] = useState<string[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
   const [systemCommands, setSystemCommands] = useState<SystemCommand[]>([]);
   const [plugins, setPlugins] = useState<Plugin[]>([]);
-  const [rightPanelTab, setRightPanelTab] = useState<'preview' | 'commands' | 'plugins'>('preview');
+  const [rightPanelTab, setRightPanelTab] = useState<'preview' | 'terminal' | 'commands' | 'plugins'>('preview');
   const [codeLibraryOpen, setCodeLibraryOpen] = useState(false);
 
-  // Load settings, plugins, and check Ollama
+  // Load settings, plugins, check connections, and init TTS
   useEffect(() => {
     setSettings(getIDESettings());
     setPlugins(getPlugins());
+    initTTS();
     
-    const checkOllama = async () => {
-      const connected = await isOllamaRunning();
-      setOllamaConnected(connected);
+    const checkConnections = async () => {
+      const ollamaOk = await isOllamaRunning();
+      setOllamaConnected(ollamaOk);
+      
+      const agent = await checkAgentStatus();
+      setAgentStatus(agent);
     };
-    checkOllama();
-    const interval = setInterval(checkOllama, 10000);
-    return () => clearInterval(interval);
+    
+    checkConnections();
+    const interval = setInterval(checkConnections, 10000);
+    
+    // Listen for agent output
+    const unsubscribe = onOutput((output, isError) => {
+      if (isError) {
+        setErrors(prev => [...prev, output]);
+      } else {
+        setLogs(prev => [...prev, output]);
+      }
+    });
+    
+    return () => {
+      clearInterval(interval);
+      unsubscribe();
+    };
   }, []);
 
   // Create default project if none exists
@@ -137,6 +161,12 @@ export default function IDE() {
       setMessages(prev => [...prev, assistantMessage]);
       setStreamingContent('');
 
+      // Speak response if TTS enabled
+      const ttsSettings = getTTSSettings();
+      if (ttsSettings.enabled) {
+        speakAIResponse(fullResponse);
+      }
+
       // Parse system commands if in system-helper mode
       if (settings.mode === 'system-helper') {
         const commands = parseCommandFromAIResponse(fullResponse);
@@ -168,13 +198,40 @@ export default function IDE() {
     
     const command = systemCommands.find(c => c.id === id);
     if (command) {
-      const result = await executeCommand(command);
+      const result = await executeSystemCommand(command);
       setSystemCommands(prev => prev.map(c => c.id === id ? result : c));
     }
   };
 
   const handleClearCommands = () => {
     setSystemCommands([]);
+  };
+
+  // Dev server controls
+  const handleStartServer = async () => {
+    setLogs(prev => [...prev, 'Starting dev server...']);
+    
+    const result = await startDevServer();
+    if (result) {
+      setIsServerRunning(true);
+      setPreviewUrl(`http://localhost:${result.port}`);
+      setLogs(prev => [...prev, `Dev server running on http://localhost:${result.port}`]);
+      toast.success('Dev server started');
+    } else {
+      // Simulated mode
+      setIsServerRunning(true);
+      setPreviewUrl('http://localhost:5173');
+      setLogs(prev => [...prev, '[Simulated] Dev server running on http://localhost:5173']);
+      toast.info('Dev server started (simulated - run LocalDev Agent for real)');
+    }
+  };
+
+  const handleStopServer = async () => {
+    await stopDevServer();
+    setIsServerRunning(false);
+    setPreviewUrl(undefined);
+    setLogs(prev => [...prev, 'Dev server stopped']);
+    toast.success('Dev server stopped');
   };
 
   // Download handlers
@@ -218,8 +275,17 @@ export default function IDE() {
           </Button>
           <h1 className="text-lg font-bold gradient-text">LocalDev AI</h1>
           <span className="text-sm text-muted-foreground">{project?.name || 'No Project'}</span>
+          
+          {/* Agent status */}
+          <div className="flex items-center gap-1.5 text-xs">
+            <Bot className="h-3.5 w-3.5" />
+            <span className={agentStatus.connected ? 'text-green-500' : 'text-muted-foreground'}>
+              {agentStatus.connected ? 'Agent Connected' : 'Agent Offline'}
+            </span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
+          <TTSControls compact />
           <ConnectionIndicator mode={settings.connectionMode} ollamaConnected={ollamaConnected} />
           
           {/* Download menu */}
@@ -240,16 +306,25 @@ export default function IDE() {
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => handleDownloadStartupScript('windows')}>
-                <Terminal className="h-4 w-4 mr-2" />
+                <TerminalIcon className="h-4 w-4 mr-2" />
                 Startup Script (Windows)
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => handleDownloadStartupScript('linux')}>
-                <Terminal className="h-4 w-4 mr-2" />
+                <TerminalIcon className="h-4 w-4 mr-2" />
                 Startup Script (Linux)
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => handleDownloadStartupScript('macos')}>
-                <Terminal className="h-4 w-4 mr-2" />
+                <TerminalIcon className="h-4 w-4 mr-2" />
                 Startup Script (macOS)
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => downloadAgentScript('windows')}>
+                <MonitorDown className="h-4 w-4 mr-2" />
+                Download Agent (Windows)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => downloadAgentScript('linux')}>
+                <MonitorDown className="h-4 w-4 mr-2" />
+                Download Agent (Linux/macOS)
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -312,8 +387,12 @@ export default function IDE() {
                   <Play className="h-3 w-3" />
                   Preview
                 </TabsTrigger>
+                <TabsTrigger value="terminal" className="gap-1">
+                  <TerminalIcon className="h-3 w-3" />
+                  Terminal
+                </TabsTrigger>
                 <TabsTrigger value="commands" className="gap-1">
-                  <Terminal className="h-3 w-3" />
+                  <TerminalIcon className="h-3 w-3" />
                   Commands
                   {systemCommands.filter(c => c.status === 'pending').length > 0 && (
                     <span className="ml-1 px-1.5 py-0.5 text-xs bg-amber-500 text-white rounded-full">
@@ -329,16 +408,18 @@ export default function IDE() {
               
               <TabsContent value="preview" className="flex-1 m-0">
                 <PreviewPane
+                  previewUrl={previewUrl}
                   isServerRunning={isServerRunning}
                   logs={logs}
                   errors={errors}
                   onRefresh={() => {}}
-                  onStartServer={() => {
-                    setIsServerRunning(true);
-                    setLogs(['Starting dev server...', 'Server running on http://localhost:5173']);
-                  }}
-                  onStopServer={() => setIsServerRunning(false)}
+                  onStartServer={handleStartServer}
+                  onStopServer={handleStopServer}
                 />
+              </TabsContent>
+              
+              <TabsContent value="terminal" className="flex-1 m-0">
+                <Terminal className="h-full" />
               </TabsContent>
               
               <TabsContent value="commands" className="flex-1 m-0">
