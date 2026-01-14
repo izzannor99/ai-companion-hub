@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Moon, Sun, Wifi, WifiOff, RefreshCw, AlertTriangle, Cpu, Plug, Flask, Brain, BookOpen, Shield } from 'lucide-react';
+import { ArrowLeft, Save, Moon, Sun, Wifi, WifiOff, RefreshCw, AlertTriangle, Cpu, Plug, FlaskConical, Brain, BookOpen, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -55,7 +55,7 @@ export default function IDESettingsPage() {
     { mode: 'system-helper', icon: <Shield className="h-5 w-5" /> },
     { mode: 'ai-improvement', icon: <Brain className="h-5 w-5" /> },
     { mode: 'learning', icon: <BookOpen className="h-5 w-5" /> },
-    { mode: 'sandbox', icon: <Flask className="h-5 w-5" /> },
+    { mode: 'sandbox', icon: <FlaskConical className="h-5 w-5" /> },
     { mode: 'jailbreak', icon: <AlertTriangle className="h-5 w-5" /> },
     { mode: 'plugin', icon: <Plug className="h-5 w-5" /> },
   ];
